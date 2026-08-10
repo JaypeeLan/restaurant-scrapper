@@ -1,8 +1,9 @@
 """
 DeepSeek-assisted experience extraction.
 
-Heuristic gate still decides *whether* a post is an experience (cheap filter).
-DeepSeek refines name / schedule / prices / categories from caption + flyer OCR.
+Heuristic gate still decides *whether* a post is an experience (cheap filter
+over caption + flyer OCR). DeepSeek refines name / schedule / prices /
+categories from caption + flyer OCR.
 
 Uses the OpenAI-compatible Chat Completions API:
 https://api-docs.deepseek.com/

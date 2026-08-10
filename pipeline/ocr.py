@@ -358,16 +358,27 @@ def title_from_ocr(text: str, *, caption: str | None = None) -> str | None:
 
 def card_title_for_post(post: dict[str, Any]) -> str | None:
     """OCR the post media and return a likely experience name."""
+    text = flyer_text_for_post(post)
+    if not text:
+        return None
+    caption = post.get("caption") or ""
+    if isinstance(caption, dict):
+        caption = caption.get("text") or ""
+    return title_from_ocr(text, caption=caption)
+
+
+def flyer_text_for_post(post: dict[str, Any]) -> str:
+    """Full OCR text from the post image (cached). Empty string if unavailable."""
     url = post.get("mediaUrl")
     if not url:
         raw = (post.get("source") or {}).get("raw") or {}
         url = raw.get("display_uri") or raw.get("display_url")
     if not url:
-        return None
+        return ""
 
     post_id = str(post.get("_id") or post.get("id") or url)
-    caption = post.get("caption") or ""
-    if isinstance(caption, dict):
-        caption = caption.get("text") or ""
-    text = ocr_url(url, cache_key=f"post:{post_id}")
-    return title_from_ocr(text, caption=caption)
+    try:
+        return (ocr_url(url, cache_key=f"post:{post_id}") or "").strip()
+    except Exception as exc:  # noqa: BLE001
+        log.debug("flyer OCR failed for %s: %s", post_id, exc)
+        return ""

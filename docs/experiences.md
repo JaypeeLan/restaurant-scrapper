@@ -3,6 +3,9 @@
 The main product calls these **experiences**. Ingest drafts a partial
 `ExperienceType` from each qualifying caption.
 
+The experience gate uses **caption + flyer OCR** (when an image is
+available). A thin caption with a detailed flyer still qualifies.
+
 ## Name priority
 
 1. **DeepSeek** (when `DEEPSEEK_API_KEY` is set) — refines name/schedule/prices from caption + flyer OCR

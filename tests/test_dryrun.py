@@ -349,6 +349,41 @@ The Details:
         brunch_name,
     )
 
+    thin = "See you this weekend ✨"
+    flyer = (
+        "Sunday Brunch Affairs\n"
+        "Every Sunday\n"
+        "12:30 PM – 4:00 PM\n"
+        "₦75,000 — Food & Alcohol"
+    )
+    check("thin caption alone is not an experience", event_extract.extract_from_text(thin) is None)
+    check(
+        "caption + flyer OCR passes the gate",
+        event_extract.extract_from_text(f"{thin}\n{flyer}", min_len=12) is not None,
+    )
+    flyer_draft = event_extract.experience_from_post(
+        {
+            "_id": "shirolagos:flyer1",
+            "handle": "shirolagos",
+            "caption": thin,
+            "mediaUrl": "https://cdn.example/flyer.jpg",
+        },
+        use_card_ocr=True,
+        use_llm=False,
+        ocr_text=flyer,
+    )
+    check("flyer-backed draft built", flyer_draft is not None, str(flyer_draft))
+    check(
+        "gateSource caption+flyer",
+        (flyer_draft or {}).get("gateSource") == "caption+flyer",
+        str((flyer_draft or {}).get("gateSource")),
+    )
+    check(
+        "flyer schedule startTime",
+        ((flyer_draft or {}).get("experience") or {}).get("schedule", {}).get("startTime") == "12:30",
+        str(((flyer_draft or {}).get("experience") or {}).get("schedule")),
+    )
+
     posts = [
         post,
         {

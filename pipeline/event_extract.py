@@ -503,23 +503,45 @@ def _build_schedule(text: str, signals: list[str]) -> dict[str, Any]:
     return schedule
 
 
-def extract_from_caption(caption: str | None) -> dict[str, Any] | None:
-    """Gate + raw hints. Prefer `experience_from_post` for product-shaped output."""
-    text = (caption or "").strip()
-    if len(text) < 24:
+def extract_from_text(text: str | None, *, min_len: int = 24) -> dict[str, Any] | None:
+    """Gate + raw hints from any text blob (caption, flyer OCR, or both)."""
+    body = (text or "").strip()
+    if len(body) < min_len:
         return None
-    signals, when_hints, score = _signals(text)
-    schedule = _build_schedule(text, signals)
+    signals, when_hints, score = _signals(body)
+    schedule = _build_schedule(body, signals)
     if not _is_experience(signals, schedule):
         return None
     return {
-        "title": _experience_name(text),
+        "title": _experience_name(body),
         "signals": signals,
         "score": score,
         "whenHints": when_hints,
-        "priceHints": [m.group(0) for m in _PRICE_RE.finditer(text)][:4],
+        "priceHints": [m.group(0) for m in _PRICE_RE.finditer(body)][:4],
         "schedule": schedule,
     }
+
+
+def extract_from_caption(caption: str | None) -> dict[str, Any] | None:
+    """Gate + raw hints. Prefer `experience_from_post` for product-shaped output."""
+    return extract_from_text(caption)
+
+
+def _gate_prefers(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    """Pick the richer gate (higher score / concrete when / price hints)."""
+    a_when = _has_concrete_when(a.get("schedule") or {})
+    b_when = _has_concrete_when(b.get("schedule") or {})
+    if b_when and not a_when:
+        return b
+    if a_when and not b_when:
+        return a
+    a_prices = len(a.get("priceHints") or [])
+    b_prices = len(b.get("priceHints") or [])
+    if b_prices > a_prices:
+        return b
+    if (b.get("score") or 0) > (a.get("score") or 0):
+        return b
+    return a
 
 
 def experience_from_post(
@@ -531,47 +553,74 @@ def experience_from_post(
     use_card_ocr: bool = True,
     use_llm: bool | None = None,
     llm_allow_network: bool = True,
+    ocr_text: str | None = None,
 ) -> dict[str, Any] | None:
     """
     Build a partial ExperienceType draft from one IG post.
 
-    Name priority: DeepSeek (when enabled) → flyer OCR → hashtag → caption.
-    Captions are treated as SEO/explanation, not the primary title source.
+    The experience gate uses caption + flyer OCR (when available), so a thin
+    caption with a detailed flyer still qualifies. Name priority: DeepSeek
+    (when enabled) → flyer OCR → hashtag → caption.
     """
     caption = (post.get("caption") or "").strip()
-    gate = extract_from_caption(caption)
-    if not gate:
-        return None
+    if isinstance(caption, dict):
+        caption = (caption.get("text") or "").strip()
 
     handle = (post.get("handle") or "").lower()
     post_id = str(post.get("_id") or post.get("id") or "")
 
+    flyer_text = (ocr_text or "").strip()
     card_title = None
-    if use_card_ocr:
+    if use_card_ocr and ocr_text is None:
         try:
-            from pipeline.ocr import card_title_for_post
+            from pipeline.ocr import flyer_text_for_post, title_from_ocr
 
-            card_title = card_title_for_post(post)
+            flyer_text = (flyer_text_for_post(post) or "").strip()
+            if flyer_text:
+                card_title = title_from_ocr(flyer_text, caption=caption)
         except Exception:  # noqa: BLE001 — OCR is best-effort
+            flyer_text = ""
+            card_title = None
+    elif flyer_text:
+        try:
+            from pipeline.ocr import title_from_ocr
+
+            card_title = title_from_ocr(flyer_text, caption=caption)
+        except Exception:  # noqa: BLE001
             card_title = None
 
+    gate = extract_from_text(caption)
+    gate_source = "caption"
+    if flyer_text:
+        combined = extract_from_text(
+            f"{caption}\n{flyer_text}".strip() if caption else flyer_text,
+            min_len=12,
+        )
+        if combined and (not gate or _gate_prefers(gate, combined) is combined):
+            gate = combined
+            gate_source = "caption+flyer" if caption else "flyer"
+
+    if not gate:
+        return None
+
+    body = f"{caption}\n{flyer_text}".strip() if flyer_text else caption
     name = card_title or gate["title"]
     name_source = "card" if card_title else "caption"
     tags = _HASHTAG_RE.findall(caption)
     mentions = [m for m in _MENTION_RE.findall(caption) if m.lower() != handle]
-    urls = _URL_RE.findall(caption)
+    urls = _URL_RE.findall(caption) or _URL_RE.findall(flyer_text)
     dress = None
-    dm = _DRESS_RE.search(caption)
+    dm = _DRESS_RE.search(body)
     if dm:
         dress = (dm.group(1) or dm.group(2) or "").strip()
     age = None
-    am = _AGE_RE.search(caption)
+    am = _AGE_RE.search(body)
     if am:
         age = next(g for g in am.groups() if g) + "+"
 
     schedule = gate["schedule"]
-    price_points = _parse_prices(caption)
-    categories = _parse_categories(caption)
+    price_points = _parse_prices(body)
+    categories = _parse_categories(body)
     website = urls[0] if urls else (profile_website or None)
     media = post.get("mediaUrl")
     owner_name = profile_name or handle
@@ -581,7 +630,7 @@ def experience_from_post(
         "active": True,
         "name": name,
         "slug": _slugify(f"{handle}-{name}")[:80],
-        "description": caption,
+        "description": caption or flyer_text,
         "tags": tags[:20],
         "ageLimit": age or "",
         "categories": categories,
@@ -617,9 +666,13 @@ def experience_from_post(
         "signals": gate["signals"],
         "score": gate["score"],
         "whenHints": gate["whenHints"],
-        "priceHints": [f"₦{p['price']}" if isinstance(p["price"], (int, float)) else str(p["price"]) for p in price_points],
+        "priceHints": [
+            f"₦{p['price']}" if isinstance(p["price"], (int, float)) else str(p["price"])
+            for p in price_points
+        ],
         "title": name,
         "nameSource": name_source,
+        "gateSource": gate_source,
         "caption": caption,
         "mediaUrl": media,
         "filled": [k for k in _FILLABLE if k not in missing],
