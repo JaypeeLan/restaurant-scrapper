@@ -554,6 +554,7 @@ def experience_from_post(
     use_llm: bool | None = None,
     llm_allow_network: bool = True,
     ocr_text: str | None = None,
+    ocr_allow_fetch: bool = True,
 ) -> dict[str, Any] | None:
     """
     Build a partial ExperienceType draft from one IG post.
@@ -575,7 +576,9 @@ def experience_from_post(
         try:
             from pipeline.ocr import flyer_text_for_post, title_from_ocr
 
-            flyer_text = (flyer_text_for_post(post) or "").strip()
+            flyer_text = (
+                flyer_text_for_post(post, allow_fetch=ocr_allow_fetch) or ""
+            ).strip()
             if flyer_text:
                 card_title = title_from_ocr(flyer_text, caption=caption)
         except Exception:  # noqa: BLE001 — OCR is best-effort
@@ -696,6 +699,8 @@ def experience_from_post(
                 heuristic_name=name,
                 profile_name=profile_name,
                 allow_network=llm_allow_network,
+                ocr_text=flyer_text,
+                ocr_allow_fetch=ocr_allow_fetch,
             )
             if llm and llm.get("isExperience") is False:
                 return None
@@ -742,6 +747,7 @@ def extract_events(
     profiles: dict[str, dict[str, Any]] | None = None,
     use_card_ocr: bool = True,
     use_llm: bool | None = None,
+    ocr_allow_fetch: bool = True,
     dedupe: bool = True,
 ) -> list[dict[str, Any]]:
     from pipeline import deepseek_extract
@@ -763,6 +769,7 @@ def extract_events(
             use_card_ocr=use_card_ocr,
             use_llm=llm_on,
             llm_allow_network=allow_network,
+            ocr_allow_fetch=ocr_allow_fetch,
         )
         if event and event.get("llm") and not event["llm"].get("cached") and allow_network:
             network_used += 1

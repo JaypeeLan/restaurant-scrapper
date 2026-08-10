@@ -32,7 +32,16 @@ DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_ENABLED=true   # default on when key is set
 ```
 
-Results are cached in `.cache/deepseek/`. `GET /api/events?llm=false` forces heuristics only.
+Results are cached in `.cache/ocr/` and `.cache/deepseek/`.
+
+`GET /api/events` stays fast by default: caption heuristics (+ any cached OCR).
+Live flyer downloads / DeepSeek are opt-in:
+
+```
+GET /api/events?ocr_fetch=true&llm=true
+```
+
+On Render the disk cache is ephemeral, so leave these off for the dashboard.
 
 ## Deduping
 

@@ -172,11 +172,25 @@ def ocr_image_bytes(data: bytes) -> str:
     return _stitch_split_title_lines(merged)
 
 
-def ocr_url(url: str, *, cache_key: str | None = None) -> str:
+def ocr_url(
+    url: str,
+    *,
+    cache_key: str | None = None,
+    allow_fetch: bool = True,
+) -> str:
+    """
+    OCR an image URL.
+
+    When ``allow_fetch`` is False, only a prior cache hit is returned — used by
+    the dashboard API so a cold Render disk does not download/OCR hundreds of
+    Instagram CDNs on every `/api/events` load.
+    """
     key = cache_key or url
     cached = read_cached(key)
     if cached is not None:
         return cached
+    if not allow_fetch:
+        return ""
 
     import httpx
 
@@ -184,7 +198,7 @@ def ocr_url(url: str, *, cache_key: str | None = None) -> str:
     try:
         resp = httpx.get(
             url,
-            timeout=25.0,
+            timeout=12.0,
             headers={
                 "User-Agent": (
                     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -367,7 +381,11 @@ def card_title_for_post(post: dict[str, Any]) -> str | None:
     return title_from_ocr(text, caption=caption)
 
 
-def flyer_text_for_post(post: dict[str, Any]) -> str:
+def flyer_text_for_post(
+    post: dict[str, Any],
+    *,
+    allow_fetch: bool = True,
+) -> str:
     """Full OCR text from the post image (cached). Empty string if unavailable."""
     url = post.get("mediaUrl")
     if not url:
@@ -378,7 +396,9 @@ def flyer_text_for_post(post: dict[str, Any]) -> str:
 
     post_id = str(post.get("_id") or post.get("id") or url)
     try:
-        return (ocr_url(url, cache_key=f"post:{post_id}") or "").strip()
+        return (
+            ocr_url(url, cache_key=f"post:{post_id}", allow_fetch=allow_fetch) or ""
+        ).strip()
     except Exception as exc:  # noqa: BLE001
         log.debug("flyer OCR failed for %s: %s", post_id, exc)
         return ""

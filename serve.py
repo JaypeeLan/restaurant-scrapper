@@ -424,17 +424,21 @@ def list_events(
     grouped: bool = Query(True, description="group by handle"),
     limit: int = Query(50, ge=1, le=200),
     skip: int = Query(0, ge=0),
-    llm: bool | None = Query(
-        None,
-        description="Refine with DeepSeek (default: on when DEEPSEEK_API_KEY is set)",
+    llm: bool = Query(
+        False,
+        description="Refine with DeepSeek (off by default — slow on cold cache)",
+    ),
+    ocr_fetch: bool = Query(
+        False,
+        description="Download + OCR image flyers live (off by default; uses disk cache only)",
     ),
 ) -> dict[str, Any]:
     """
     Experience drafts from captions, shaped like the main product ExperienceType.
 
     Derived on read from `ig_posts_raw`. Incomplete fields listed per item under
-    `missing`. When DeepSeek is configured, names/schedules/prices are refined
-    (cached under `.cache/deepseek/`).
+    `missing`. Live OCR/DeepSeek are opt-in so the dashboard stays responsive;
+    cached OCR/LLM results are still applied when present under `.cache/`.
 
     Paginated: `limit`/`skip` apply to profile groups when `grouped=true`, else
     to flat experience items. `total` is the full count before slicing.
@@ -470,7 +474,11 @@ def list_events(
             }
 
     events = event_extract.extract_events(
-        posts, min_score=min_score, profiles=profiles, use_llm=llm
+        posts,
+        min_score=min_score,
+        profiles=profiles,
+        use_llm=llm,
+        ocr_allow_fetch=ocr_fetch,
     )
     for event in events:
         event["postedAt"] = _iso(event.get("postedAt"))
@@ -480,6 +488,8 @@ def list_events(
 
     llm_meta = {
         "enabled": bool(settings.DEEPSEEK_ENABLED and settings.DEEPSEEK_API_KEY),
+        "requested": llm,
+        "ocrFetch": ocr_fetch,
         "model": settings.DEEPSEEK_MODEL if settings.DEEPSEEK_API_KEY else None,
         "refined": sum(1 for e in events if e.get("nameSource") == "deepseek"),
     }

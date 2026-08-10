@@ -101,21 +101,14 @@ def _cache_key(*, handle: str, post_id: str, caption: str, ocr_text: str) -> str
     return f"v1:{hashlib.sha1(blob.encode()).hexdigest()}"
 
 
-def _flyer_ocr_text(post: dict[str, Any]) -> str:
+def _flyer_ocr_text(post: dict[str, Any], *, allow_fetch: bool = True) -> str:
     """Best-effort raw OCR for the model (not the heuristic title picker)."""
     try:
-        from pipeline.ocr import ocr_url
+        from pipeline.ocr import flyer_text_for_post
     except ImportError:
         return ""
-    url = post.get("mediaUrl")
-    if not url:
-        raw = (post.get("source") or {}).get("raw") or {}
-        url = raw.get("display_uri") or raw.get("display_url")
-    if not url:
-        return ""
-    post_id = str(post.get("_id") or post.get("id") or "")
     try:
-        return (ocr_url(url, cache_key=f"post:{post_id}") or "").strip()
+        return flyer_text_for_post(post, allow_fetch=allow_fetch)
     except Exception as exc:  # noqa: BLE001
         log.debug("ocr for deepseek failed: %s", exc)
         return ""
@@ -210,6 +203,7 @@ def extract_experience_fields(
     ocr_text: str | None = None,
     use_cache: bool = True,
     allow_network: bool = True,
+    ocr_allow_fetch: bool = True,
 ) -> dict[str, Any] | None:
     """
     Return DeepSeek JSON fields for a post, or None on failure/disabled.
@@ -226,7 +220,9 @@ def extract_experience_fields(
         caption = (caption.get("text") or "").strip()
 
     if ocr_text is None:
-        ocr_text = _flyer_ocr_text(post) if allow_network or use_cache else ""
+        # Cache-only OCR when LLM itself is not allowed to hit the network.
+        fetch = ocr_allow_fetch and allow_network
+        ocr_text = _flyer_ocr_text(post, allow_fetch=fetch) if (fetch or use_cache) else ""
 
     key = _cache_key(handle=handle, post_id=post_id, caption=caption, ocr_text=ocr_text or "")
     if use_cache:
