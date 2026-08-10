@@ -5,8 +5,7 @@
 #   2. Ingest cron      → every 30 min (Starter, billed while running)
 #   3. Discover cron    → daily 03:15 UTC (Starter, billed while running)
 #
-# Create an Environment Group in the dashboard named `ig-ingest-env` (or change
-# fromGroup below) and put secrets there once for all three services.
+# Environment group `ig-ingest-env` holds Mongo / cookies / DeepSeek secrets.
 # Keep INGEST_EVERY_MINUTES / DISCOVER_EVERY_HOURS in sync with the cron
 # schedules below so the Runs UI matches reality.
 
@@ -32,7 +31,7 @@ services:
     repo: https://github.com/JaypeeLan/restaurant-scrapper
     branch: main
     schedule: "*/30 * * * *"
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && playwright install --with-deps chromium
     startCommand: python main.py ingest
     envVars:
       - fromGroup: ig-ingest-env
@@ -45,7 +44,45 @@ services:
     repo: https://github.com/JaypeeLan/restaurant-scrapper
     branch: main
     schedule: "15 3 * * *"
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && playwright install --with-deps chromium
     startCommand: python main.py discover --backend osm
     envVars:
       - fromGroup: ig-ingest-env
+
+envVarGroups:
+  - name: ig-ingest-env
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB_NAME
+        sync: false
+      - key: IG_FALLBACK_ENABLED
+        value: "true"
+      - key: IG_GRAPH_ACCESS_TOKEN
+        sync: false
+      - key: IG_GRAPH_USER_ID
+        sync: false
+      - key: IG_COOKIES_NETSCAPE
+        sync: false
+      - key: IG_COOKIES_FILE
+        value: cookies.txt
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_MODEL
+        value: deepseek-v4-flash
+      - key: DEEPSEEK_ENABLED
+        value: "true"
+      - key: DISCOVER_CITY
+        value: lagos
+      - key: INGEST_EVERY_MINUTES
+        value: "30"
+      - key: INGEST_LIMIT
+        value: "40"
+      - key: DISCOVER_EVERY_HOURS
+        value: "24"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: IG_FALLBACK_MAX_PER_RUN
+        value: "40"
+      - key: PYTHON_VERSION
+        value: "3.12.8"
