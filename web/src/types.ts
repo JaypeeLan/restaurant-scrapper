@@ -68,6 +68,16 @@ export interface Account {
   backfilled?: boolean;
 }
 
+export interface AccountRunResult {
+  handle: string;
+  tier?: string | null;
+  status: string;
+  source?: string | null;
+  postsNew?: number;
+  postsChanged?: number;
+  error?: string | null;
+}
+
 export interface Run {
   id: string;
   kind?: 'ingest' | 'discover';
@@ -79,6 +89,7 @@ export interface Run {
   postsNew?: number;
   postsChanged?: number;
   postsUnchanged?: number;
+  accountResults?: AccountRunResult[];
   city?: string;
   placesFound?: number;
   placesUpserted?: number;

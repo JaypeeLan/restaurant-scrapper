@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -15,7 +15,7 @@ import {
 } from 'recharts';
 import { api, useFetch } from '../api';
 import { countdown, dateTime, fullNumber, relativeTime } from '../format';
-import type { Run, RunSchedule } from '../types';
+import type { AccountRunResult, Run, RunSchedule } from '../types';
 import { Empty, ErrorState, Loading, Pager, Panel } from './Common';
 
 const COLORS = {
@@ -65,6 +65,76 @@ function formatGap(minutes: number | null | undefined): string {
   const hours = minutes / 60;
   if (hours < 48) return `${hours.toFixed(1)} h`;
   return `${(hours / 24).toFixed(1)} d`;
+}
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case 'ok':
+      return 'ok';
+    case 'failed':
+      return 'failed';
+    case 'blocked':
+      return 'blocked';
+    case 'graph_missed':
+      return 'graph miss';
+    case 'queued_fallback':
+      return '→ playwright';
+    case 'skipped_cap':
+      return 'over cap';
+    case 'skipped_blocked':
+      return 'skipped (block)';
+    case 'skipped_fallback_disabled':
+      return 'fallback off';
+    case 'skipped_unprocessed':
+      return 'not processed';
+    default:
+      return status;
+  }
+}
+
+function statusTone(status: string): string {
+  if (status === 'ok') return 'hot';
+  if (status === 'failed' || status === 'blocked') return 'danger';
+  if (status.startsWith('skipped')) return 'cold';
+  return 'warm';
+}
+
+function AccountResults({ items }: { items: AccountRunResult[] }) {
+  if (!items.length) {
+    return <p className="note">No per-account detail on this run.</p>;
+  }
+  return (
+    <div className="table-wrap run-accounts">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Handle</th>
+            <th>Status</th>
+            <th>Source</th>
+            <th className="table__num">New</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((a) => (
+            <tr key={a.handle}>
+              <td className="table__handle">@{a.handle}</td>
+              <td>
+                <span className={`badge badge--${statusTone(a.status)}`}>
+                  {statusLabel(a.status)}
+                </span>
+              </td>
+              <td>{a.source ?? '—'}</td>
+              <td className="table__num">{fullNumber(a.postsNew ?? 0)}</td>
+              <td className="table__sub" title={a.error ?? undefined}>
+                {a.error ?? '—'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function runDetail(r: Run): string {
@@ -247,6 +317,7 @@ export function RunStats() {
   const [limit, setLimit] = useState(50);
   const [skip, setSkip] = useState(0);
   const [kindFilter, setKindFilter] = useState<'all' | 'ingest' | 'discover'>('all');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const { data, loading, error, reload } = useFetch(
     (signal) =>
       api.runs(
@@ -360,6 +431,7 @@ export function RunStats() {
             <table className="table">
               <thead>
                 <tr>
+                  <th />
                   <th>Finished</th>
                   <th>Kind</th>
                   <th>Details</th>
@@ -376,34 +448,71 @@ export function RunStats() {
                     ingest && attempted
                       ? Math.round(((attempted - (r.failed ?? 0)) / attempted) * 100)
                       : null;
+                  const open = expandedId === r.id;
+                  const canExpand =
+                    Boolean(r.accountResults?.length) ||
+                    Boolean(!ingest && r.handles?.length);
                   return (
-                    <tr key={r.id}>
-                      <td title={r.finishedAt}>
-                        <div>{dateTime(r.finishedAt)}</div>
-                        <div className="table__sub">{relativeTime(r.finishedAt)}</div>
-                      </td>
-                      <td>
-                        <span className={`badge badge--${ingest ? 'warm' : 'cold'}`}>
-                          {ingest ? 'ingest' : 'discover'}
-                        </span>
-                      </td>
-                      <td>
-                        <div>{runDetail(r)}</div>
-                        {!ingest && r.handles?.length ? (
-                          <div className="table__sub">
-                            {r.handles
-                              .slice(0, 6)
-                              .map((h) => `@${h}`)
-                              .join(', ')}
-                            {r.handles.length > 6 ? '…' : ''}
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="table__num">{fullNumber(r.durationS)}s</td>
-                      <td className="table__num">
-                        {success == null ? '—' : `${success}%`}
-                      </td>
-                    </tr>
+                    <Fragment key={r.id}>
+                      <tr
+                        className={canExpand ? 'table__row--clickable' : undefined}
+                        onClick={() => {
+                          if (!canExpand) return;
+                          setExpandedId(open ? null : r.id);
+                        }}
+                      >
+                        <td className="table__num">{canExpand ? (open ? '▾' : '▸') : ''}</td>
+                        <td title={r.finishedAt}>
+                          <div>{dateTime(r.finishedAt)}</div>
+                          <div className="table__sub">{relativeTime(r.finishedAt)}</div>
+                        </td>
+                        <td>
+                          <span className={`badge badge--${ingest ? 'warm' : 'cold'}`}>
+                            {ingest ? 'ingest' : 'discover'}
+                          </span>
+                        </td>
+                        <td>
+                          <div>{runDetail(r)}</div>
+                          {ingest && r.accountResults?.length ? (
+                            <div className="table__sub">
+                              click to show {r.accountResults.length} accounts
+                            </div>
+                          ) : null}
+                          {!ingest && r.handles?.length ? (
+                            <div className="table__sub">
+                              {r.handles
+                                .slice(0, 6)
+                                .map((h) => `@${h}`)
+                                .join(', ')}
+                              {r.handles.length > 6 ? '…' : ''}
+                            </div>
+                          ) : null}
+                          {ingest && !r.accountResults?.length ? (
+                            <div className="table__sub">
+                              no per-account detail (older run)
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="table__num">{fullNumber(r.durationS)}s</td>
+                        <td className="table__num">
+                          {success == null ? '—' : `${success}%`}
+                        </td>
+                      </tr>
+                      {open && (
+                        <tr className="table__expand">
+                          <td colSpan={6}>
+                            {ingest ? (
+                              <AccountResults items={r.accountResults ?? []} />
+                            ) : (
+                              <p className="note">
+                                Seeded:{' '}
+                                {(r.handles ?? []).map((h) => `@${h}`).join(', ') || '—'}
+                              </p>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>

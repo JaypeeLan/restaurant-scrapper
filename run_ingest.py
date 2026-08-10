@@ -54,6 +54,61 @@ class Ingestor:
             "postsChanged": 0,
             "postsUnchanged": 0,
         }
+        # Per-handle outcomes for the Runs UI (stable order = due-queue order).
+        self.account_results: list[dict[str, Any]] = []
+        self._by_handle: dict[str, dict[str, Any]] = {}
+
+    def _seed_accounts(self, accounts: list[dict[str, Any]]) -> None:
+        for account in accounts:
+            handle = str(account.get("handle") or "").strip().lstrip("@").lower()
+            if not handle:
+                continue
+            row = {
+                "handle": handle,
+                "tier": account.get("tier"),
+                "status": "queued",
+                "source": None,
+                "postsNew": 0,
+                "postsChanged": 0,
+                "error": None,
+            }
+            self._by_handle[handle] = row
+            self.account_results.append(row)
+
+    def _touch(
+        self,
+        handle: str,
+        *,
+        status: str | None = None,
+        source: str | None = None,
+        posts_new: int | None = None,
+        posts_changed: int | None = None,
+        error: str | None = None,
+    ) -> None:
+        handle = handle.strip().lstrip("@").lower()
+        row = self._by_handle.get(handle)
+        if row is None:
+            row = {
+                "handle": handle,
+                "tier": None,
+                "status": "queued",
+                "source": None,
+                "postsNew": 0,
+                "postsChanged": 0,
+                "error": None,
+            }
+            self._by_handle[handle] = row
+            self.account_results.append(row)
+        if status is not None:
+            row["status"] = status
+        if source is not None:
+            row["source"] = source
+        if posts_new is not None:
+            row["postsNew"] = posts_new
+        if posts_changed is not None:
+            row["postsChanged"] = posts_changed
+        if error is not None:
+            row["error"] = error[:240]
 
     # ── persistence shared by both sources ────────────────────────────────────
 
@@ -92,6 +147,15 @@ class Ingestor:
                 source=source,
             )
 
+        self._touch(
+            handle,
+            status="ok",
+            source=source,
+            posts_new=result["new"],
+            posts_changed=result["changed"],
+            error=None,
+        )
+
         log.info(
             "[%s] %s → %d new / %d changed / %d unchanged (tier=%s)",
             source,
@@ -115,6 +179,8 @@ class Ingestor:
                     "[graph] not configured — Playwright-only mode "
                     "(set IG_GRAPH_ACCESS_TOKEN + IG_GRAPH_USER_ID later to use Graph)"
                 )
+                for account in accounts:
+                    self._touch(account["handle"], status="queued_fallback", source="playwright")
                 self.fallback_queue.extend(accounts)
                 return
 
@@ -137,6 +203,12 @@ class Ingestor:
                     except NotDiscoverable as exc:
                         log.info("[graph] %s not discoverable (%s) → fallback", handle, exc)
                         self.stats["graphMissed"] += 1
+                        self._touch(
+                            handle,
+                            status="graph_missed",
+                            source="graph",
+                            error=str(exc),
+                        )
                         self.fallback_queue.append(account)
                         return
                     except CircuitOpen:
@@ -144,6 +216,12 @@ class Ingestor:
                     except Exception as exc:  # noqa: BLE001
                         log.warning("[graph] %s failed: %s", handle, exc)
                         self.stats["failed"] += 1
+                        self._touch(
+                            handle,
+                            status="failed",
+                            source="graph",
+                            error=str(exc),
+                        )
                         if not self.dry_run:
                             store.record_failure(self.db, handle, str(exc))
                         return
@@ -176,11 +254,26 @@ class Ingestor:
             log.info(
                 "[fallback] disabled — %d accounts skipped", len(self.fallback_queue)
             )
+            for account in self.fallback_queue:
+                self._touch(
+                    account["handle"],
+                    status="skipped_fallback_disabled",
+                    source="playwright",
+                )
             return
 
         from ig.playwright_fallback import Blocked, PlaywrightFallback
 
         queue = self.fallback_queue[: settings.IG_FALLBACK_MAX_PER_RUN]
+        overflow = self.fallback_queue[settings.IG_FALLBACK_MAX_PER_RUN :]
+        for account in overflow:
+            self._touch(
+                account["handle"],
+                status="skipped_cap",
+                source="playwright",
+                error=f"over IG_FALLBACK_MAX_PER_RUN={settings.IG_FALLBACK_MAX_PER_RUN}",
+            )
+
         log.info(
             "[fallback] draining %d of %d queued accounts (cap %d)",
             len(queue),
@@ -188,23 +281,44 @@ class Ingestor:
             settings.IG_FALLBACK_MAX_PER_RUN,
         )
 
+        stopped_reason: str | None = None
         async with PlaywrightFallback() as fb:
             for account in queue:
                 handle = account["handle"]
+                self._touch(handle, status="fetching", source="playwright")
                 try:
                     user = await fb.fetch_profile(handle)
                 except Blocked as exc:
                     log.error("[fallback] blocked (%s) — stopping for this run", exc)
+                    stopped_reason = str(exc)
+                    self._touch(
+                        handle,
+                        status="blocked",
+                        source="playwright",
+                        error=stopped_reason,
+                    )
                     break
                 except Exception as exc:  # noqa: BLE001
                     log.warning("[fallback] %s failed: %s", handle, exc)
                     self.stats["failed"] += 1
+                    self._touch(
+                        handle,
+                        status="failed",
+                        source="playwright",
+                        error=str(exc),
+                    )
                     if not self.dry_run:
                         store.record_failure(self.db, handle, str(exc))
                     continue
 
                 if not user:
                     self.stats["failed"] += 1
+                    self._touch(
+                        handle,
+                        status="failed",
+                        source="playwright",
+                        error="fallback returned no user",
+                    )
                     if not self.dry_run:
                         store.record_failure(self.db, handle, "fallback returned no user")
                     continue
@@ -240,6 +354,18 @@ class Ingestor:
 
             log.info("[fallback] stats: %s", fb.stats)
 
+        if stopped_reason:
+            for account in queue:
+                handle = account["handle"]
+                row = self._by_handle.get(handle)
+                if row and row.get("status") in ("queued", "queued_fallback", "fetching", "graph_missed"):
+                    self._touch(
+                        handle,
+                        status="skipped_blocked",
+                        source="playwright",
+                        error=stopped_reason,
+                    )
+
 
 async def ingest(*, limit: int, tier: str | None, dry_run: bool) -> dict[str, Any]:
     db = None if dry_run else store.get_db()
@@ -254,13 +380,29 @@ async def ingest(*, limit: int, tier: str | None, dry_run: bool) -> dict[str, An
     started = datetime.now(timezone.utc)
     ing = Ingestor(db, dry_run=dry_run)
     ing.stats["accounts"] = len(accounts)
+    ing._seed_accounts(accounts)
 
     await ing.run_graph(accounts)
-    await ing.run_fallback()
+    try:
+        await ing.run_fallback()
+    except Exception as exc:  # noqa: BLE001
+        log.error("[fallback] aborted: %s", exc)
+        for row in ing.account_results:
+            if row.get("status") in ("queued", "queued_fallback", "fetching", "graph_missed"):
+                row["status"] = "failed"
+                row["error"] = str(exc)[:240]
+                ing.stats["failed"] += 1
+
+    # Leftover queue states → not processed (blocked mid-run already marked).
+    for row in ing.account_results:
+        if row.get("status") in ("queued", "queued_fallback", "fetching", "graph_missed"):
+            row["status"] = "skipped_unprocessed"
+            row["error"] = row.get("error") or "not processed this run"
 
     summary = {
         **ing.stats,
         "kind": "ingest",
+        "accountResults": ing.account_results,
         "startedAt": started,
         "durationS": round((datetime.now(timezone.utc) - started).total_seconds(), 1),
     }

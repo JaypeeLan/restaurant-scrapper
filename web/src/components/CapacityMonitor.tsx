@@ -90,13 +90,7 @@ export function CapacityMonitor() {
             </dd>
           </dl>
 
-          {playwrightOnly && (
-            <p className="note">
-              Running Playwright-only. Graph stays optional — add{' '}
-              <code>IG_GRAPH_ACCESS_TOKEN</code> + <code>IG_GRAPH_USER_ID</code> later to
-              move business/creator accounts onto the sanctioned path.
-            </p>
-          )}
+       
           {!data.fallbackEnabled && !data.graphConfigured && (
             <p className="note note--warn">
               No ingest source is enabled. Turn on Playwright or set Graph credentials.

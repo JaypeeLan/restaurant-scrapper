@@ -526,6 +526,20 @@ a {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  &__row--clickable {
+    cursor: pointer;
+  }
+
+  &__expand td {
+    background: $bg-inset;
+    padding: $s-3 $s-4;
+    white-space: normal;
+  }
+}
+
+.run-accounts {
+  margin-top: 0;
 }
 
 .schedule-grid {
