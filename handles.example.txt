@@ -1,0 +1,14 @@
+# Nigerian venues / hosts — one Instagram handle per line.
+# Lines starting with # are ignored. Leading @ is stripped; handles are lowercased.
+#
+#   python main.py seed --file handles.txt
+#
+# Tip: business/creator accounts resolve via the free Graph API. Personal and
+# private accounts fall through to the rate-limited scraper.
+
+nokbyalara
+rsvplagos
+shirolagos
+quilox
+cubanaofficallagos
+softlagos

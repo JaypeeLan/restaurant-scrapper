@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# tests/test_api.py runs the API against an in-memory Mongo
+mongomock>=4.1.2

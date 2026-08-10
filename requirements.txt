@@ -1,0 +1,17 @@
+httpx>=0.27.0
+pymongo>=4.6.0
+certifi>=2024.0.0
+python-dotenv>=1.0.0
+apscheduler>=3.10.4
+
+# Read API for the dashboard (serve.py)
+fastapi>=0.110.0
+uvicorn>=0.27.0
+
+# Fallback path only — skip if IG_FALLBACK_ENABLED=false
+playwright>=1.40.0
+playwright-stealth>=1.0.6
+
+# Flyer/card title OCR (needs system tesseract binary)
+pillow>=10.0.0
+pytesseract>=0.3.10

@@ -1,0 +1,23 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+output/
+*.log
+cookies.txt
+cookies.json
+.cache/
+.DS_Store
+*.pem
+
+# frontend
+web/node_modules/
+web/dist/
+
+# local scratch
+handles.txt

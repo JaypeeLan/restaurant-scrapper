@@ -1,0 +1,71 @@
+// Design tokens
+
+$bg:            #f4f1ec;
+$bg-raised:     #fffdf9;
+$bg-inset:      #e8e3db;
+$border:        #d9d2c6;
+$border-strong: #b7ae9f;
+
+$text:          #1c1915;
+$text-muted:    #5c564c;
+$text-faint:    #8a8276;
+
+$accent:        #0f6e56;
+$accent-dim:    rgba(15, 110, 86, 0.12);
+
+$tier-hot:      #0f6e56;
+$tier-warm:     #1d6fb8;
+$tier-cold:     #b86a1d;
+$tier-dormant:  #7a746a;
+
+$ok:            #0f6e56;
+$warn:          #b86a1d;
+$danger:        #b42318;
+
+$source-graph:    #0f6e56;
+$source-web:      #b86a1d;
+$source-embed:    #5b4db8;
+
+$s-1: 4px;
+$s-2: 8px;
+$s-3: 12px;
+$s-4: 16px;
+$s-5: 24px;
+$s-6: 32px;
+$s-7: 48px;
+
+$r-sm: 2px;
+$r-md: 4px;
+$r-lg: 6px;
+
+$font: 'Literata', 'Iowan Old Style', 'Palatino Linotype', Palatino, serif;
+$font-ui: 'Sora', 'Avenir Next', 'Segoe UI', sans-serif;
+$font-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+
+$fs-xs: 11px;
+$fs-sm: 13px;
+$fs-md: 15px;
+$fs-lg: 18px;
+$fs-xl: 22px;
+$fs-2xl: 32px;
+
+$max-width: 1120px;
+$header-h: 64px;
+
+$shadow: none;
+
+$bp-md: 900px;
+$bp-sm: 620px;
+
+$tier-colors: (
+  'hot': $tier-hot,
+  'warm': $tier-warm,
+  'cold': $tier-cold,
+  'dormant': $tier-dormant,
+);
+
+$source-colors: (
+  'graph': $source-graph,
+  'web_json': $source-web,
+  'embed': $source-embed,
+);
