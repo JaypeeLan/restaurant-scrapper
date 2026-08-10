@@ -1,7 +1,7 @@
 # Render Blueprint — https://render.com/docs/blueprint-spec
 #
 # Deploys:
-#   1. Web API (Free)   → uvicorn serve:app
+#   1. Web API (Free)   → uvicorn + built dashboard at /
 #   2. Ingest cron      → every 30 min (Starter, billed while running)
 #   3. Discover cron    → daily 03:15 UTC (Starter, billed while running)
 #
@@ -17,7 +17,7 @@ services:
     region: oregon
     repo: https://github.com/JaypeeLan/restaurant-scrapper
     branch: main
-    buildCommand: pip install -r requirements.txt
+    buildCommand: bash scripts/build_api.sh
     startCommand: uvicorn serve:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     envVars:
@@ -31,7 +31,7 @@ services:
     repo: https://github.com/JaypeeLan/restaurant-scrapper
     branch: main
     schedule: "*/30 * * * *"
-    buildCommand: pip install -r requirements.txt && playwright install --with-deps chromium
+    buildCommand: bash scripts/build_cron.sh
     startCommand: python main.py ingest
     envVars:
       - fromGroup: ig-ingest-env
@@ -44,7 +44,7 @@ services:
     repo: https://github.com/JaypeeLan/restaurant-scrapper
     branch: main
     schedule: "15 3 * * *"
-    buildCommand: pip install -r requirements.txt && playwright install --with-deps chromium
+    buildCommand: bash scripts/build_discover.sh
     startCommand: python main.py discover --backend osm
     envVars:
       - fromGroup: ig-ingest-env

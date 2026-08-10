@@ -6,9 +6,11 @@ Blueprint: [`render.yaml`](../render.yaml)
 
 | Service | Type | Schedule | Command |
 |---|---|---|---|
-| `ig-ingest-api` | Web (Free) | always on* | `uvicorn serve:app` |
+| `ig-ingest-api` | Web (Free) | always on* | API + dashboard at `/` |
 | `ig-ingest-cron` | Cron (Starter) | every 30 min UTC | `python main.py ingest` |
 | `ig-discover-cron` | Cron (Starter) | daily 03:15 UTC | `python main.py discover --backend osm` |
+
+Dashboard URL: **https://ig-ingest-api.onrender.com/**
 
 \*Free web services sleep after idle; first request after sleep can be slow.
 
