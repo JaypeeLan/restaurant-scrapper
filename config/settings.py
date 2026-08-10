@@ -148,6 +148,9 @@ DISCOVER_RESOLVE_LIMIT: int = _int("DISCOVER_RESOLVE_LIMIT", 40)
 INGEST_EVERY_MINUTES: int = _int("INGEST_EVERY_MINUTES", 30)
 INGEST_LIMIT: int = _int("INGEST_LIMIT", 40)
 DISCOVER_EVERY_HOURS: int = _int("DISCOVER_EVERY_HOURS", 24)
+# Wall-clock UTC slot for the discover cron (matches render.yaml `15 3 * * *`).
+DISCOVER_CRON_HOUR: int = _int("DISCOVER_CRON_HOUR", 3)
+DISCOVER_CRON_MINUTE: int = _int("DISCOVER_CRON_MINUTE", 15)
 
 
 def preflight() -> list[str]:

@@ -50,6 +50,58 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _next_ingest_at(now: datetime | None = None) -> datetime:
+    """Next UTC ingest slot on the */N clock grid (matches Render cron)."""
+    now = now or _now()
+    every = max(1, settings.INGEST_EVERY_MINUTES)
+    # Floor current UTC minutes since epoch to the cadence grid, then step once.
+    minute_epoch = int(now.timestamp()) // 60
+    next_minute = ((minute_epoch // every) + 1) * every
+    return datetime.fromtimestamp(next_minute * 60, tz=timezone.utc)
+
+
+def _next_discover_at(now: datetime | None = None) -> datetime | None:
+    """Next discover fire time in UTC (daily wall-clock when every >= 24h)."""
+    if settings.DISCOVER_EVERY_HOURS <= 0:
+        return None
+    now = now or _now()
+    hour = max(0, min(23, settings.DISCOVER_CRON_HOUR))
+    minute = max(0, min(59, settings.DISCOVER_CRON_MINUTE))
+    if settings.DISCOVER_EVERY_HOURS >= 24:
+        candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if candidate <= now:
+            candidate += timedelta(days=1)
+        return candidate
+    # Sub-daily: hour grid from midnight UTC.
+    every_h = settings.DISCOVER_EVERY_HOURS
+    hour_epoch = int(now.timestamp()) // 3600
+    next_hour = ((hour_epoch // every_h) + 1) * every_h
+    return datetime.fromtimestamp(next_hour * 3600, tz=timezone.utc).replace(
+        minute=minute, second=0, microsecond=0
+    )
+
+
+def _schedule_next() -> dict[str, Any]:
+    now = _now()
+    nxt_ingest = _next_ingest_at(now)
+    nxt_discover = _next_discover_at(now)
+    return {
+        "now": _iso(now),
+        "nextIngestAt": _iso(nxt_ingest),
+        "nextIngestInSeconds": max(0, int((nxt_ingest - now).total_seconds())),
+        "nextDiscoverAt": _iso(nxt_discover) if nxt_discover else None,
+        "nextDiscoverInSeconds": (
+            max(0, int((nxt_discover - now).total_seconds())) if nxt_discover else None
+        ),
+        "ingestCron": f"*/{max(1, settings.INGEST_EVERY_MINUTES)} * * * *",
+        "discoverCron": (
+            f"{settings.DISCOVER_CRON_MINUTE} {settings.DISCOVER_CRON_HOUR} * * *"
+            if settings.DISCOVER_EVERY_HOURS > 0
+            else None
+        ),
+    }
+
+
 def _db():
     try:
         db = store.get_db()
@@ -148,6 +200,7 @@ def summary() -> dict[str, Any]:
             )
         ),
         "generatedAt": _iso(_now()),
+        **_schedule_next(),
     }
 
 
@@ -357,6 +410,7 @@ def list_runs(
             if (g := _observed_gap_minutes(recent, kind="discover")) is not None
             else None
         ),
+        **_schedule_next(),
     }
 
 

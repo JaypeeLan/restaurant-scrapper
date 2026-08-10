@@ -54,6 +54,21 @@ export function dateTime(iso: string | null | undefined): string {
   });
 }
 
+/** "12m 04s", "due now", "—" */
+export function countdown(seconds: number | null | undefined): string {
+  if (seconds == null || Number.isNaN(seconds)) return '—';
+  if (seconds <= 0) return 'due now';
+  const s = Math.floor(seconds);
+  const days = Math.floor(s / 86_400);
+  const hours = Math.floor((s % 86_400) / 3_600);
+  const mins = Math.floor((s % 3_600) / 60);
+  const secs = s % 60;
+  if (days > 0) return `${days}d ${hours}h ${mins}m`;
+  if (hours > 0) return `${hours}h ${mins}m ${String(secs).padStart(2, '0')}s`;
+  if (mins > 0) return `${mins}m ${String(secs).padStart(2, '0')}s`;
+  return `${secs}s`;
+}
+
 export function isOverdue(iso: string | null | undefined): boolean {
   if (!iso) return false;
   const t = new Date(iso).getTime();

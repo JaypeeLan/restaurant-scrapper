@@ -112,6 +112,13 @@ export interface RunsResponse extends Paged<Run> {
   lastDiscoverAt: string | null;
   observedIngestGapMinutes: number | null;
   observedDiscoverGapHours: number | null;
+  now?: string;
+  nextIngestAt?: string | null;
+  nextIngestInSeconds?: number | null;
+  nextDiscoverAt?: string | null;
+  nextDiscoverInSeconds?: number | null;
+  ingestCron?: string | null;
+  discoverCron?: string | null;
 }
 
 export interface Summary {
@@ -124,6 +131,13 @@ export interface Summary {
   highlights: number;
   events: number;
   generatedAt: string;
+  now?: string;
+  nextIngestAt?: string | null;
+  nextIngestInSeconds?: number | null;
+  nextDiscoverAt?: string | null;
+  nextDiscoverInSeconds?: number | null;
+  ingestCron?: string | null;
+  discoverCron?: string | null;
 }
 
 export interface ExperienceDraft {

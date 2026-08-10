@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -14,7 +14,7 @@ import {
   YAxis,
 } from 'recharts';
 import { api, useFetch } from '../api';
-import { dateTime, fullNumber, relativeTime } from '../format';
+import { countdown, dateTime, fullNumber, relativeTime } from '../format';
 import type { Run, RunSchedule } from '../types';
 import { Empty, ErrorState, Loading, Pager, Panel } from './Common';
 
@@ -88,20 +88,55 @@ function runDetail(r: Run): string {
   return parts.join(' · ');
 }
 
+function useCountdown(targetIso: string | null | undefined): number | null {
+  const [seconds, setSeconds] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!targetIso) {
+      setSeconds(null);
+      return;
+    }
+    const tick = () => {
+      const t = new Date(targetIso).getTime();
+      if (Number.isNaN(t)) {
+        setSeconds(null);
+        return;
+      }
+      setSeconds(Math.max(0, Math.floor((t - Date.now()) / 1000)));
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [targetIso]);
+
+  return seconds;
+}
+
 function SchedulePanel({
   schedule,
   lastIngestAt,
   lastDiscoverAt,
   observedIngestGapMinutes,
   observedDiscoverGapHours,
+  nextIngestAt,
+  nextDiscoverAt,
+  ingestCron,
+  discoverCron,
 }: {
   schedule: RunSchedule;
   lastIngestAt: string | null;
   lastDiscoverAt: string | null;
   observedIngestGapMinutes: number | null;
   observedDiscoverGapHours: number | null;
+  nextIngestAt?: string | null;
+  nextDiscoverAt?: string | null;
+  ingestCron?: string | null;
+  discoverCron?: string | null;
 }) {
   const tiers = schedule.tierIntervalsHours;
+  const ingestLeft = useCountdown(nextIngestAt);
+  const discoverLeft = useCountdown(nextDiscoverAt);
+
   return (
     <Panel
       title="Cadence"
@@ -111,6 +146,19 @@ function SchedulePanel({
         <div className="schedule-card">
           <h3>Ingest</h3>
           <dl className="kv">
+            <dt>Next run</dt>
+            <dd>
+              <strong className="countdown">{countdown(ingestLeft)}</strong>
+              {nextIngestAt ? (
+                <div className="table__sub" title={nextIngestAt}>
+                  {dateTime(nextIngestAt)} UTC grid
+                </div>
+              ) : null}
+            </dd>
+            <dt>Cron</dt>
+            <dd>
+              <code>{ingestCron ?? `*/${schedule.ingestEveryMinutes} * * * *`}</code>
+            </dd>
             <dt>Configured</dt>
             <dd>every {schedule.ingestEveryMinutes} min</dd>
             <dt>Accounts / run</dt>
@@ -137,6 +185,21 @@ function SchedulePanel({
         <div className="schedule-card">
           <h3>Discover</h3>
           <dl className="kv">
+            <dt>Next run</dt>
+            <dd>
+              <strong className="countdown">{countdown(discoverLeft)}</strong>
+              {nextDiscoverAt ? (
+                <div className="table__sub" title={nextDiscoverAt}>
+                  {dateTime(nextDiscoverAt)}
+                </div>
+              ) : (
+                <div className="table__sub">off</div>
+              )}
+            </dd>
+            <dt>Cron</dt>
+            <dd>
+              <code>{discoverCron ?? '—'}</code>
+            </dd>
             <dt>Configured</dt>
             <dd>
               {schedule.discoverEveryHours > 0
@@ -242,6 +305,10 @@ export function RunStats() {
           lastDiscoverAt={data.lastDiscoverAt}
           observedIngestGapMinutes={data.observedIngestGapMinutes}
           observedDiscoverGapHours={data.observedDiscoverGapHours}
+          nextIngestAt={data.nextIngestAt}
+          nextDiscoverAt={data.nextDiscoverAt}
+          ingestCron={data.ingestCron}
+          discoverCron={data.discoverCron}
         />
       )}
 

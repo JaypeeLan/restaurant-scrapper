@@ -1,5 +1,6 @@
+import { useEffect, useState } from 'react';
 import { api, useFetch } from '../api';
-import { fullNumber, relativeTime } from '../format';
+import { countdown, dateTime, fullNumber, relativeTime } from '../format';
 import { ErrorState } from './Common';
 
 function Stat({
@@ -22,8 +23,40 @@ function Stat({
   );
 }
 
+/** Live countdown from an absolute ISO target (ticks every second). */
+function useCountdown(targetIso: string | null | undefined): number | null {
+  const [seconds, setSeconds] = useState<number | null>(() => {
+    if (!targetIso) return null;
+    const t = new Date(targetIso).getTime();
+    if (Number.isNaN(t)) return null;
+    return Math.max(0, Math.floor((t - Date.now()) / 1000));
+  });
+
+  useEffect(() => {
+    if (!targetIso) {
+      setSeconds(null);
+      return;
+    }
+    const tick = () => {
+      const t = new Date(targetIso).getTime();
+      if (Number.isNaN(t)) {
+        setSeconds(null);
+        return;
+      }
+      setSeconds(Math.max(0, Math.floor((t - Date.now()) / 1000)));
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [targetIso]);
+
+  return seconds;
+}
+
 export function SummaryBar() {
   const { data, error, reload } = useFetch((signal) => api.summary(signal), []);
+  const ingestLeft = useCountdown(data?.nextIngestAt);
+  const discoverLeft = useCountdown(data?.nextDiscoverAt);
 
   if (error) return <ErrorState message={error} onRetry={reload} />;
   if (!data) return null;
@@ -36,6 +69,22 @@ export function SummaryBar() {
         label="Accounts"
         value={fullNumber(data.accounts)}
         sub={`${fullNumber(data.accountsDue)} due`}
+      />
+      <Stat
+        label="Next ingest"
+        value={countdown(ingestLeft)}
+        sub={data.nextIngestAt ? dateTime(data.nextIngestAt) : data.ingestCron ?? undefined}
+      />
+      <Stat
+        label="Next discover"
+        value={countdown(discoverLeft)}
+        sub={
+          data.nextDiscoverAt
+            ? dateTime(data.nextDiscoverAt)
+            : data.discoverCron === null
+              ? 'off'
+              : undefined
+        }
       />
       <Stat
         label="Failing"
