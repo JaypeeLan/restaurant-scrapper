@@ -1,9 +1,9 @@
 # Render Blueprint — https://render.com/docs/blueprint-spec
 #
 # Deploys:
-#   1. Web API          → uvicorn serve:app
-#   2. Ingest cron      → every 30 min
-#   3. Discover cron    → daily 03:15 UTC
+#   1. Web API (Free)   → uvicorn serve:app
+#   2. Ingest cron      → every 30 min (Starter, billed while running)
+#   3. Discover cron    → daily 03:15 UTC (Starter, billed while running)
 #
 # Create an Environment Group in the dashboard named `ig-ingest-env` (or change
 # fromGroup below) and put secrets there once for all three services.
@@ -14,8 +14,10 @@ services:
   - type: web
     name: ig-ingest-api
     runtime: python
-    plan: starter
+    plan: free
     region: oregon
+    repo: https://github.com/JaypeeLan/restaurant-scrapper
+    branch: main
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn serve:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
@@ -27,6 +29,8 @@ services:
     runtime: python
     plan: starter
     region: oregon
+    repo: https://github.com/JaypeeLan/restaurant-scrapper
+    branch: main
     schedule: "*/30 * * * *"
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py ingest
@@ -38,6 +42,8 @@ services:
     runtime: python
     plan: starter
     region: oregon
+    repo: https://github.com/JaypeeLan/restaurant-scrapper
+    branch: main
     schedule: "15 3 * * *"
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py discover --backend osm

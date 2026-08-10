@@ -6,9 +6,11 @@ Blueprint: [`render.yaml`](../render.yaml)
 
 | Service | Type | Schedule | Command |
 |---|---|---|---|
-| `ig-ingest-api` | Web | always on | `uvicorn serve:app` |
-| `ig-ingest-cron` | Cron | every 30 min UTC | `python main.py ingest` |
-| `ig-discover-cron` | Cron | daily 03:15 UTC | `python main.py discover --backend osm` |
+| `ig-ingest-api` | Web (Free) | always on* | `uvicorn serve:app` |
+| `ig-ingest-cron` | Cron (Starter) | every 30 min UTC | `python main.py ingest` |
+| `ig-discover-cron` | Cron (Starter) | daily 03:15 UTC | `python main.py discover --backend osm` |
+
+\*Free web services sleep after idle; first request after sleep can be slow.
 
 Dashboard static UI (`web/`) is optional — the API alone is enough; point the
 Vite app at the Render URL via `VITE_API_BASE`, or build the SPA into `web/dist`
