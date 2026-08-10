@@ -12,6 +12,7 @@ output/
 cookies.txt
 cookies.json
 .cache/
+ms-playwright/
 .DS_Store
 *.pem
 

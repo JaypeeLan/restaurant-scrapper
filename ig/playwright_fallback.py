@@ -45,8 +45,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import random
 import re
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
 from config import settings
@@ -55,6 +59,55 @@ log = logging.getLogger("ig.fallback")
 
 # Deliberately tiny. This is a tail-case path, not a throughput path.
 _MAX_CONCURRENCY = 2
+
+
+def _browsers_dir() -> Path:
+    root = Path(__file__).resolve().parents[1]
+    configured = (settings.PLAYWRIGHT_BROWSERS_PATH or "ms-playwright").strip()
+    path = Path(configured)
+    if not path.is_absolute():
+        path = root / path
+    path.mkdir(parents=True, exist_ok=True)
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(path)
+    return path
+
+
+def ensure_playwright_browsers() -> Path:
+    """
+    Keep Chromium under the project tree.
+
+    Render's ~/.cache path used during `playwright install` is not reliably
+    present when the cron runtime starts, which surfaces as
+    "Executable doesn't exist ... chromium_headless_shell".
+    """
+    path = _browsers_dir()
+    shell = next(
+        path.glob(
+            "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"
+        ),
+        None,
+    )
+    full = next(path.glob("chromium-*/chrome-linux64/chrome"), None)
+    # macOS local paths (for dev)
+    if shell is None:
+        shell = next(
+            path.glob(
+                "chromium_headless_shell-*/chrome-headless-shell-mac-*/chrome-headless-shell"
+            ),
+            None,
+        )
+    if full is None:
+        full = next(path.glob("chromium-*/chrome-mac-*/Google Chrome for Testing"), None)
+    if shell is not None or full is not None:
+        return path
+
+    log.info("[fallback] installing Playwright Chromium into %s", path)
+    subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"],
+        check=True,
+        env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(path)},
+    )
+    return path
 
 _USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -219,15 +272,19 @@ class PlaywrightFallback:
     async def __aenter__(self) -> "PlaywrightFallback":
         from playwright.async_api import async_playwright
 
+        ensure_playwright_browsers()
         self._pw = await async_playwright().start()
-        self._browser = await self._pw.chromium.launch(
-            headless=settings.SCRAPER_HEADLESS,
-            args=[
+        launch_kwargs: dict[str, Any] = {
+            "headless": settings.SCRAPER_HEADLESS,
+            "args": [
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
             ],
-        )
+        }
+        if settings.IG_PROXY_URL:
+            launch_kwargs["proxy"] = {"server": settings.IG_PROXY_URL}
+        self._browser = await self._pw.chromium.launch(**launch_kwargs)
         return self
 
     async def __aexit__(self, *exc: Any) -> None:

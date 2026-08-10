@@ -74,6 +74,9 @@ IG_FALLBACK_MAX_GAP_S: int = _int("IG_FALLBACK_MAX_GAP_S", 55)
 # Optional: any proxy URL you already have. Empty = your own IP.
 IG_PROXY_URL: str = _str("IG_PROXY_URL", "")
 SCRAPER_HEADLESS: bool = _bool("SCRAPER_HEADLESS", True)
+# Store Playwright browsers inside the project so Render cron keep them after build.
+# Empty → <repo>/ms-playwright
+PLAYWRIGHT_BROWSERS_PATH: str = _str("PLAYWRIGHT_BROWSERS_PATH", "ms-playwright")
 IG_HIGHLIGHTS_ENABLED: bool = _bool("IG_HIGHLIGHTS_ENABLED", True)
 
 # ── Concurrency / pacing ──────────────────────────────────────────────────────
