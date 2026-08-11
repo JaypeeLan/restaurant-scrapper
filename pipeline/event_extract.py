@@ -163,6 +163,17 @@ _AS_TITLE = re.compile(
     r"(?=\s+(?:officially|opens?|premieres?|returns?|hits?\b|lands?\b|at\b|on\b|"
     r"this\b|from\b|by\b)|[.!]|$)",
 )
+# Embedded show title inside a sentence:
+# "…stage, Dear Kaffy London: Diary of a Single Woman is here."
+_INLINE_COLON_TITLE = re.compile(
+    r"\b("
+    r"[A-Z][\w'’]+(?:\s+[A-Z][\w'’]+){1,5}"
+    r"\s*:\s*"
+    r"[A-Z][\w'’]+(?:\s+(?:a|an|the|of|and|or|for|to|in|on|at|by|[A-Z][\w'’]+))+"
+    r")"
+    r"(?=\s+(?:is|are|was|were|here|tonight|officially|opens?|comes?|coming|"
+    r"hits?\b|lands?\b|at\b|on\b|this\b)|[.!,|]|$)",
+)
 
 
 def _hashtag_to_title(tag: str) -> str:
@@ -269,6 +280,18 @@ def _name_from_as_clause(caption: str) -> str | None:
     return title[:160]
 
 
+def _name_from_inline_colon_title(caption: str) -> str | None:
+    """Pull 'Show Name: Subtitle' out of a prose sentence."""
+    best: str | None = None
+    for m in _INLINE_COLON_TITLE.finditer(caption):
+        title = re.sub(r"\s+", " ", m.group(1)).strip(" :,-–—")
+        if _is_bad_experience_name(title):
+            continue
+        if best is None or len(title) > len(best):
+            best = title[:160]
+    return best
+
+
 def _experience_name(caption: str) -> str:
     """
     Caption fallback when card OCR finds nothing usable.
@@ -282,6 +305,10 @@ def _experience_name(caption: str) -> str:
     from_as = _name_from_as_clause(caption)
     if from_as:
         return from_as
+
+    from_inline = _name_from_inline_colon_title(caption)
+    if from_inline:
+        return from_inline
 
     from_tag = _name_from_hashtags(caption)
     if from_tag:
@@ -802,10 +829,22 @@ def _experience_name_key(name: str) -> str:
     return _slugify(s) or "untitled"
 
 
+def _event_cluster_key(event: dict[str, Any]) -> tuple[str, str]:
+    """Handle + normalized name; re-parse caption when the label is Untitled."""
+    handle = (event.get("handle") or "").lower()
+    name = ((event.get("experience") or {}).get("name") or event.get("title") or "").strip()
+    if not name or name.lower() in ("untitled", "experience"):
+        name = _experience_name(event.get("caption") or "")
+    return (handle, _experience_name_key(name))
+
+
 def _draft_richness(event: dict[str, Any]) -> tuple[int, Any]:
     """Prefer DeepSeek/card names, fuller schedules/prices, then newest post."""
     exp = event.get("experience") or {}
     score = 0
+    name = (exp.get("name") or event.get("title") or "").strip()
+    if name.lower() in ("", "untitled", "experience"):
+        score -= 6
     if event.get("nameSource") == "deepseek":
         score += 8
     elif event.get("nameSource") == "card":
@@ -824,7 +863,7 @@ def _draft_richness(event: dict[str, Any]) -> tuple[int, Any]:
     if event.get("mediaUrl"):
         score += 1
     # Prefer longer, more specific titles when equally rich
-    score += min(len((exp.get("name") or "").split()), 4)
+    score += min(len(name.split()), 4)
     return (score, event.get("postedAt") or "")
 
 
@@ -938,9 +977,7 @@ def dedupe_experiences(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     buckets: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for event in events:
-        handle = (event.get("handle") or "").lower()
-        name = ((event.get("experience") or {}).get("name") or event.get("title") or "")
-        key = (handle, _experience_name_key(name))
+        key = _event_cluster_key(event)
         buckets.setdefault(key, []).append(event)
 
     merged: list[dict[str, Any]] = []

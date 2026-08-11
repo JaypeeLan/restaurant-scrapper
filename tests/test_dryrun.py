@@ -434,16 +434,33 @@ The Details:
             ),
             "permalink": "https://www.instagram.com/p/c/",
         },
+        {
+            "_id": "terrakulture:d",
+            "handle": "terrakulture",
+            "shortcode": "d",
+            "postedAt": "2026-08-07T18:00:00Z",
+            "caption": (
+                "Doors open today. 🎭✨\n\n"
+                "From the rehearsal room to the Shaw Theatre stage, "
+                "Dear Kaffy London: Diary of a Single Woman is here.\n\n"
+                "Aug 7–9 | Shaw Theatre, London. Tickets in bio."
+            ),
+            "permalink": "https://www.instagram.com/p/d/",
+        },
     ]
     kaffy = event_extract.extract_events(kaffy_posts, use_card_ocr=False, use_llm=False)
     check("dear kaffy deduped to one", len(kaffy) == 1, len(kaffy))
     if kaffy:
-        check("dedupe keeps source posts", (kaffy[0].get("postCount") or 0) >= 2, kaffy[0].get("postCount"))
+        check("dedupe keeps source posts", (kaffy[0].get("postCount") or 0) >= 3, kaffy[0].get("postCount"))
         check(
             "dedupe name is Dear Kaffy",
             "kaffy" in ((kaffy[0].get("experience") or {}).get("name") or "").lower(),
             (kaffy[0].get("experience") or {}).get("name"),
         )
+    prose = event_extract._experience_name(
+        "Doors open today. From the stage, Dear Kaffy London: Diary of a Single Woman is here."
+    )
+    check("inline colon title parsed", "kaffy" in prose.lower() and "untitled" not in prose.lower(), prose)
 
 
 def main() -> int:
