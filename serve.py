@@ -32,14 +32,21 @@ app = FastAPI(title="Instagram ingest API", version="1.0.0")
 _ALLOWED_ORIGINS = [
     o.strip()
     for o in os.getenv(
-        "IG_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+        "IG_CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173",
     ).split(",")
     if o.strip()
 ]
+# Vercel production + preview deployments (*.vercel.app).
+_CORS_ORIGIN_REGEX = os.getenv(
+    "IG_CORS_ORIGIN_REGEX",
+    r"https://([a-z0-9-]+\.)*vercel\.app",
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
+    allow_origin_regex=_CORS_ORIGIN_REGEX or None,
     allow_credentials=False,
     allow_methods=["GET"],
     allow_headers=["*"],

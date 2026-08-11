@@ -50,6 +50,23 @@ services:
     envVars:
       - fromGroup: ig-ingest-env
 
+  # Free web sleeps after ~15m idle. Ping keeps the API awake so the Vercel
+  # dashboard does not hit the Render “APPLICATION LOADING” interstitial.
+  - type: cron
+    name: ig-keepalive-cron
+    runtime: python
+    plan: starter
+    region: oregon
+    repo: https://github.com/JaypeeLan/restaurant-scrapper
+    branch: main
+    schedule: "*/10 * * * *"
+    buildCommand: "true"
+    startCommand: bash scripts/keepalive.sh
+    envVars:
+      - fromGroup: ig-ingest-env
+      - key: KEEPALIVE_URL
+        value: https://ig-ingest-api.onrender.com/api/health
+
 envVarGroups:
   - name: ig-ingest-env
     envVars:

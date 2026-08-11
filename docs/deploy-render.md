@@ -9,8 +9,10 @@ Blueprint: [`render.yaml`](../render.yaml)
 | `ig-ingest-api` | Web (Free) | always on* | API + dashboard at `/` |
 | `ig-ingest-cron` | Cron (Starter) | every 30 min UTC | `python main.py ingest` |
 | `ig-discover-cron` | Cron (Starter) | every 4h UTC (`15 */4 * * *`) | `python main.py discover --backend osm --ingest-after` |
+| `ig-keepalive-cron` | Cron (Starter) | every 10 min | ping `/api/health` (keeps free web awake) |
 
-Dashboard URL: **https://ig-ingest-api.onrender.com/**
+Dashboard UI is better on **Vercel** (instant HTML) — see [deploy-vercel.md](deploy-vercel.md).
+The free Render web service remains the API (+ optional SPA fallback).
 
 \*Free web services sleep after idle; first request after sleep can be slow.
 

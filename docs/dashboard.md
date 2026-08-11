@@ -11,6 +11,16 @@ cd web && npm install && npm run dev
 
 http://localhost:5173 proxies `/api` to the FastAPI process.
 
+For a production-style split (static UI → remote API):
+
+```bash
+cd web
+VITE_API_BASE=https://ig-ingest-api.onrender.com/api npm run dev
+```
+
+Production UI is intended for **Vercel** — see [deploy-vercel.md](deploy-vercel.md).
+The API remains on Render.
+
 ## Views
 
 | View | Purpose |

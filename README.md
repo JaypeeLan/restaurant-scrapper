@@ -13,7 +13,8 @@ events, menus, or dress codes yet.
 | [docs/dashboard.md](docs/dashboard.md) | Read-only UI and API |
 | [docs/experiences.md](docs/experiences.md) | ExperienceType field coverage from IG |
 | [docs/handle-discovery.md](docs/handle-discovery.md) | Auto Places → IG handles → seed |
-| [docs/deploy-render.md](docs/deploy-render.md) | Render web + cron blueprint |
+| [docs/deploy-render.md](docs/deploy-render.md) | Render API + cron blueprint |
+| [docs/deploy-vercel.md](docs/deploy-vercel.md) | Dashboard on Vercel (recommended) |
 
 ## Quick start
 
