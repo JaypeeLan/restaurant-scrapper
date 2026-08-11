@@ -60,7 +60,7 @@ services:
     repo: https://github.com/JaypeeLan/restaurant-scrapper
     branch: main
     schedule: "*/10 * * * *"
-    buildCommand: "true"
+    buildCommand: bash scripts/build_keepalive.sh
     startCommand: bash scripts/keepalive.sh
     envVars:
       - fromGroup: ig-ingest-env

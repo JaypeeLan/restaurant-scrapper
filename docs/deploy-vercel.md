@@ -38,6 +38,6 @@ waits while Render boots.
 
 ## Optional: stop serving the SPA from Render
 
-You can leave the API build as-is (static files on Render are a harmless
-fallback). To skip the Node install on the API service later, change
-`scripts/build_api.sh` to only `pip install -r requirements.txt`.
+API builds skip the Vite SPA by default (`BUILD_WEB=0`) because the UI is on
+Vercel. To bake the dashboard into the API service again, set `BUILD_WEB=1` on
+`ig-ingest-api`.
