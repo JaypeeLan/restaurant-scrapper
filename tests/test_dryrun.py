@@ -289,6 +289,27 @@ def test_event_extract() -> None:
     )
     check("ignores brand vibe post", vibe is None)
 
+    soft_vibe = (
+        "Wednesday is calling, and Crossroads is the place to be!\n\n"
+        "Get ready for a night of great music, amazing energy, good company, "
+        "and unforgettable moments. Come eat, drink, dance, and enjoy the vibes "
+        "that make every Wednesday special.\n\n"
+        "Gather your people and let’s make tonight one to remember."
+    )
+    check(
+        "vibe 'Wednesday special' is not an offering",
+        event_extract.extract_from_text(soft_vibe) is None,
+    )
+    check(
+        "untitled soft vibe not drafted",
+        event_extract.experience_from_post(
+            {"_id": "crossroads:soft", "handle": "crossroads_texmex", "caption": soft_vibe},
+            use_card_ocr=False,
+            use_llm=False,
+        )
+        is None,
+    )
+
     post = {
         "_id": "shirolagos:abc",
         "handle": "shirolagos",
@@ -461,6 +482,43 @@ The Details:
         "Doors open today. From the stage, Dear Kaffy London: Diary of a Single Woman is here."
     )
     check("inline colon title parsed", "kaffy" in prose.lower() and "untitled" not in prose.lower(), prose)
+
+    ferrari_caption = (
+        "🚨FRIDAY HAS ONLY ONE ADDRESS. 🚨\n"
+        "The lights are on. The DJs are locked in.\n"
+        "This isn't just another night out, it's Ferrari Friday at Red Bar Lagos!\n"
+        "🕘 9PM Till Dawn\n🎟️ Reserve your table now via DM.\n"
+        "#ferrarifriday #redbarlagos #lagosevents"
+    )
+    ferrari_name = event_extract._experience_name(ferrari_caption)
+    check(
+        "ferrari friday beats slogan",
+        ferrari_name.lower() == "ferrari friday",
+        ferrari_name,
+    )
+    check(
+        "ferrarifriday hashtag splits",
+        event_extract._hashtag_to_title("ferrarifriday").lower() == "ferrari friday",
+        event_extract._hashtag_to_title("ferrarifriday"),
+    )
+    ferrari_draft = event_extract.experience_from_post(
+        {
+            "_id": "redbar:ferrari",
+            "handle": "redbarlagos",
+            "caption": ferrari_caption,
+            "permalink": "https://www.instagram.com/p/DbbC8cStzJo/",
+        },
+        use_card_ocr=False,
+        use_llm=False,
+    )
+    check("ferrari draft qualifies", ferrari_draft is not None)
+    if ferrari_draft:
+        check(
+            "ferrari draft name",
+            ((ferrari_draft.get("experience") or {}).get("name") or "").lower()
+            == "ferrari friday",
+            (ferrari_draft.get("experience") or {}).get("name"),
+        )
 
 
 def main() -> int:

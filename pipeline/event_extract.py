@@ -37,7 +37,8 @@ EXPERIENCE_CATEGORIES = (
 _CATEGORY_KEYWORDS: list[tuple[str, re.Pattern[str]]] = [
     ("Food", re.compile(
         r"\b(sushi|dim\s*sum|brunch|buffet|tasting|menu|culinary|lunch|dinner|"
-        r"unlimited|teppanyaki|hibachi|specials?)\b", re.I)),
+        r"unlimited|teppanyaki|hibachi|"
+        r"(?:chef'?s|daily|weekly|today'?s)\s+specials?|food\s+specials?)\b", re.I)),
     ("Drinks", re.compile(
         r"\b(cocktail|happy\s*hour|wine|champagne|heineken|bar|unlimited\s+"
         r"cocktails?|drinks?)\b", re.I)),
@@ -75,13 +76,17 @@ _SIGNAL_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("price", re.compile(r"[₦$€£]\s?\d[\d,]*(?:\.\d+)?")),
     ("offering", re.compile(
         r"\b(unlimited|buffet|brunch|happy\s*hour|all\s*you\s*can\s*eat|"
-        r"live\s+(dj|band|music|jazz|acoustics)|guest\s+dj|after\s*party|"
-        r"open\s*mic|specials?|tasting\s+menu|teppanyaki|hibachi|seatings?)\b",
+        r"live\s+(dj|band|music|jazz|acoustics|sax)|guest\s+dj|after\s*party|"
+        r"open\s*mic|tasting\s+menu|teppanyaki|hibachi|seatings?|"
+        r"(?:chef'?s|daily|weekly|today'?s)\s+specials?|food\s+specials?|"
+        r"specials?\s*:|"
+        r"bottle\s+service|till\s+dawn|top\s+djs?|walk\s*-?\s*ins?|"
+        r"reserve\s+your\s+table|premium\s+bottle)\b",
         re.I,
     )),
     ("show", re.compile(
         r"\b(show|concert|theatre|theater|premiere|doors\s+open|curtain|"
-        r"performance|nightlife)\b",
+        r"performance|nightlife|djs?\s+all\s+night)\b",
         re.I,
     )),
     ("venue_cue", re.compile(r"\b(at\s+the|join\s+us|see\s+you|don'?t\s+miss)\b", re.I)),
@@ -133,7 +138,9 @@ _NEEDS_PRODUCT = (
 
 _OFFERING_LINE = re.compile(
     r"\b(unlimited|buffet|brunch|happy\s*hour|all\s*you\s*can\s*eat|"
-    r"live\s+(dj|band|music|jazz|acoustics)|specials?|tasting\s+menu|"
+    r"live\s+(dj|band|music|jazz|acoustics)|"
+    r"(?:chef'?s|daily|weekly|today'?s)\s+specials?|food\s+specials?|specials?\s*:|"
+    r"tasting\s+menu|"
     r"sushi|dim\s*sum|guest\s+dj|open\s*mic|after\s*party|"
     r"teppanyaki|hibachi|seatings?)\b",
     re.I,
@@ -153,8 +160,12 @@ _NARRATIVE_NAME = re.compile(
     r"\b(welcomes you|final episode|in the final|critics have|this is your|"
     r"queues like|don'?t hear|one last|the reviews are|have spoken|"
     r"you witnessed|came out in numbers|scan\s+here|last\s+show|final\s+show|"
-    r"get\s+your\s+ticket)\b|"
-    r"^the\s+.+\s+theat(?:re|er)\b",
+    r"get\s+your\s+ticket|"
+    r"only\s+one\s+address|has\s+only\s+one|another\s+night\s+out|"
+    r"lights?\s+are\s+on|djs?\s+are\s+locked|bottles?\s+are\s+chilled|"
+    r"expect\s*:)\b|"
+    r"^the\s+.+\s+theat(?:re|er)\b|"
+    r"^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+has\b",
     re.I,
 )
 _AS_TITLE = re.compile(
@@ -174,18 +185,53 @@ _INLINE_COLON_TITLE = re.compile(
     r"(?=\s+(?:is|are|was|were|here|tonight|officially|opens?|comes?|coming|"
     r"hits?\b|lands?\b|at\b|on\b|this\b)|[.!,|]|$)",
 )
+# "it's Ferrari Friday at Red Bar" / "it is Soul Saturday @ venue"
+_ITS_NAMED_AT = re.compile(
+    r"\bit(?:'?s|\s+is)\s+"
+    r"([A-Z][\w'’]+(?:\s+[A-Z][\w'’]+){0,4})\s+"
+    r"(?:at|@)\b",
+)
+# "Ferrari Friday", "Shiro Sunday Brunch" in prose (Title Case + weekday/offering)
+_NAMED_NIGHT = re.compile(
+    r"\b("
+    r"(?!Every|This|Next|Last|Each|Coming)\b"
+    r"[A-Z][\w'’]+(?:\s+[A-Z][\w'’]+){0,3}\s+"
+    r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
+    r"(?:\s+(?:Brunch|Night|Affairs?|Session|Party))?"
+    r")\b",
+)
+_HASHTAG_EVENT_SUFFIX = re.compile(
+    r"(sunday|monday|tuesday|wednesday|thursday|friday|saturday|"
+    r"brunch|night|party|affairs?|festival|session|seatings?|unlimited)$",
+    re.I,
+)
 
 
 def _hashtag_to_title(tag: str) -> str:
-    """ShiroSundayBrunch → Shiro Sunday Brunch."""
+    """ShiroSundayBrunch / ferrarifriday → Shiro Sunday Brunch / Ferrari Friday."""
     spaced = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", tag)
     spaced = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", spaced)
-    spaced = re.sub(r"[_-]+", " ", spaced)
-    return spaced.strip()
+    spaced = re.sub(r"[_-]+", " ", spaced).strip()
+    if " " not in spaced:
+        m = _HASHTAG_EVENT_SUFFIX.search(spaced)
+        if m and m.start() >= 3:
+            head, tail = spaced[: m.start()], spaced[m.start() :]
+            spaced = f"{head} {tail}"
+    return spaced
+
+
+def _is_usable_experience_name(name: str | None) -> bool:
+    """True when we have a real offering title (not a placeholder / slogan)."""
+    cleaned = re.sub(r"\s+", " ", (name or "")).strip()
+    cleaned = re.sub(r"[\W🔥📅🥂✨🥢🍻🎶📲🎭🎟️📍🗓️🚨🏎️❤️]+$", "", cleaned).strip(" .!")
+    if not cleaned or cleaned.lower() in {"untitled", "experience", "n/a", "na", "tbd"}:
+        return False
+    return not _is_bad_experience_name(cleaned)
 
 
 def _is_bad_experience_name(name: str) -> bool:
     cleaned = re.sub(r"\s+", " ", name).strip()
+    cleaned = re.sub(r"[\W🔥📅🥂✨🥢🍻🎶📲🎭🎟️📍🗓️🚨🏎️❤️]+$", "", cleaned).strip(" .!")
     if not cleaned or len(cleaned) < 4:
         return True
     if len(cleaned) > 72 or cleaned.count(" ") > 10:
@@ -207,13 +253,13 @@ def _name_from_hashtags(caption: str) -> str | None:
     preferred: list[str] = []
     fallback: list[str] = []
     for tag in tags:
-        title = _hashtag_to_title(tag)
-        if len(title) < 8 or _is_bad_experience_name(title):
+        title = _title_case_show(_hashtag_to_title(tag))
+        if len(title) < 6 or _is_bad_experience_name(title):
             continue
         words = title.split()
         if not (2 <= len(words) <= 5):
             continue
-        if _EVENTISH_HASHTAG.search(tag):
+        if _EVENTISH_HASHTAG.search(tag) or _HASHTAG_EVENT_SUFFIX.search(tag):
             preferred.append(title[:160])
         else:
             fallback.append(title[:160])
@@ -242,8 +288,9 @@ def _title_case_show(name: str) -> str:
 
 def _name_from_all_caps_line(caption: str) -> str | None:
     for line in caption.splitlines():
-        cleaned = re.sub(r"\s+", " ", line).strip(" \t-–—•*|🔥📅🎭✨🎟📍🗓️")
-        cleaned = re.sub(r"^[\W🔥📅🥂✨🥢🍻🎶📲🎭🎟️📍🗓️]+", "", cleaned).strip(" :")
+        cleaned = re.sub(r"\s+", " ", line).strip(" \t-–—•*|🔥📅🎭✨🎟📍🗓️🚨🏎️❤️")
+        cleaned = re.sub(r"^[\W🔥📅🥂✨🥢🍻🎶📲🎭🎟️📍🗓️🚨]+", "", cleaned)
+        cleaned = re.sub(r"[\W🔥📅🥂✨🥢🍻🎶📲🎭🎟️📍🗓️🚨🏎️❤️]+$", "", cleaned).strip(" :.")
         if not cleaned or _PRICE_LINE.search(cleaned):
             continue
         letters = [c for c in cleaned if c.isalpha()]
@@ -292,12 +339,41 @@ def _name_from_inline_colon_title(caption: str) -> str | None:
     return best
 
 
+def _name_from_named_night(caption: str) -> str | None:
+    """
+    Nightlife / weekly branded nights from caption prose.
+
+    Prefer 'it's Ferrari Friday at Red Bar' over marketing slogans.
+    """
+    m = _ITS_NAMED_AT.search(caption)
+    if m:
+        title = re.sub(r"\s+", " ", m.group(1)).strip(" :,-–—")
+        if not _is_bad_experience_name(title):
+            return title[:160]
+
+    best: str | None = None
+    for m in _NAMED_NIGHT.finditer(caption):
+        title = re.sub(r"\s+", " ", m.group(1)).strip()
+        if _is_bad_experience_name(title):
+            continue
+        # Prefer multi-word branded nights (Ferrari Friday > Friday alone)
+        if " " not in title:
+            continue
+        if best is None or len(title) > len(best):
+            best = title[:160]
+    return best
+
+
 def _experience_name(caption: str) -> str:
     """
     Caption fallback when card OCR finds nothing usable.
 
     Prefer a real show/offering label. Never use long SEO openers as the name.
     """
+    from_night = _name_from_named_night(caption)
+    if from_night:
+        return from_night
+
     from_caps = _name_from_all_caps_line(caption)
     if from_caps:
         return from_caps
@@ -488,15 +564,17 @@ def _has_concrete_when(schedule: dict[str, Any]) -> bool:
 
 def _is_experience(signals: list[str], schedule: dict[str, Any]) -> bool:
     """
-    Reject vibe / brand posts. Need a real offering or ticketed show
+    Reject vibe / brand posts. Need a real offering or ticketed/bookable night
     plus a usable when (time, date, or recurrence days).
     """
     has_offer = "offering" in signals or "price" in signals
     has_ticketed_show = "ticket" in signals and "show" in signals
+    # Nightlife promos often say "reserve your table" + 9PM without "show".
+    has_bookable_slot = "ticket" in signals and "time" in signals
     has_when = _has_concrete_when(schedule)
     if not has_when:
         return False
-    return has_offer or has_ticketed_show
+    return has_offer or has_ticketed_show or has_bookable_slot
 
 
 def _build_schedule(text: str, signals: list[str]) -> dict[str, Any]:
@@ -741,6 +819,11 @@ def experience_from_post(
                 draft["missing"] = missing2
         except Exception:  # noqa: BLE001 — LLM is best-effort
             pass
+
+    final_name = ((draft.get("experience") or {}).get("name") or draft.get("title") or "")
+    if not _is_usable_experience_name(final_name):
+        # No recoverable title after caption / OCR / LLM — do not publish Untitled.
+        return None
 
     return draft
 
