@@ -225,12 +225,15 @@ export interface EventProfileGroup {
 export interface EventsResponse {
   grouped: boolean;
   total: number;
+  experienceTotal?: number;
   limit: number;
   skip: number;
   llm?: {
     enabled: boolean;
     model: string | null;
     refined: number;
+    requested?: boolean;
+    ocrFetch?: boolean;
   };
   profiles?: EventProfileGroup[];
   items?: EventCandidate[];

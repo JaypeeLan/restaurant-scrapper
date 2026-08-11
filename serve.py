@@ -142,6 +142,60 @@ def _iso(value: Any) -> Any:
     return value
 
 
+_EVENT_POST_LIMIT = 1000
+_EVENT_POST_PROJECTION = {
+    "source.raw": 0,
+    "contentHash": 0,
+}
+
+
+def _experience_drafts(
+    db: Any,
+    *,
+    handle: str | None = None,
+    min_score: int = 2,
+    use_llm: bool = False,
+    ocr_fetch: bool = False,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    """
+    Shared experience extraction for summary + /api/events.
+
+    Defaults match the dashboard: no live OCR/DeepSeek (cache + caption only)
+    so both endpoints always agree on counts.
+    """
+    query: dict[str, Any] = {}
+    if handle:
+        query["handle"] = handle.strip().lstrip("@").lower()
+
+    posts = list(
+        db[settings.COL_POSTS]
+        .find(query, _EVENT_POST_PROJECTION)
+        .sort([("postedAt", -1)])
+        .limit(_EVENT_POST_LIMIT)
+    )
+    handles = list({(p.get("handle") or "").lower() for p in posts if p.get("handle")})
+    profiles: dict[str, dict[str, Any]] = {}
+    if handles:
+        for a in db[settings.COL_ACCOUNTS].find(
+            {"handle": {"$in": handles}},
+            {"handle": 1, "profile.name": 1, "profile.website": 1},
+        ):
+            prof = a.get("profile") or {}
+            profiles[a["handle"]] = {
+                "name": prof.get("name"),
+                "website": prof.get("website"),
+            }
+
+    events = event_extract.extract_events(
+        posts,
+        min_score=min_score,
+        profiles=profiles,
+        use_llm=use_llm,
+        ocr_allow_fetch=ocr_fetch,
+    )
+    return events, profiles
+
+
 def _clean(doc: dict[str, Any], *, drop_raw: bool = True) -> dict[str, Any]:
     """
     Serialize a Mongo doc for the wire.
@@ -192,6 +246,8 @@ def summary() -> dict[str, Any]:
     day_ago = _now() - timedelta(days=1)
     week_ago = _now() - timedelta(days=7)
 
+    events, _profiles = _experience_drafts(db)
+
     return {
         "accounts": accounts.count_documents({}),
         "accountsDue": accounts.count_documents({"nextFetchAt": {"$lte": _now()}}),
@@ -200,15 +256,7 @@ def summary() -> dict[str, Any]:
         "postsLast24h": posts.count_documents({"firstSeenAt": {"$gte": day_ago}}),
         "postsLast7d": posts.count_documents({"firstSeenAt": {"$gte": week_ago}}),
         "highlights": db[settings.COL_HIGHLIGHTS].count_documents({}),
-        "events": len(
-            event_extract.extract_events(
-                list(
-                    posts.find({}, {"caption": 1, "handle": 1, "_id": 1})
-                    .sort([("postedAt", -1)])
-                    .limit(2000)
-                )
-            )
-        ),
+        "events": len(events),
         "generatedAt": _iso(_now()),
         **_schedule_next(),
     }
@@ -451,44 +499,16 @@ def list_events(
     cached OCR/LLM results are still applied when present under `.cache/`.
 
     Paginated: `limit`/`skip` apply to profile groups when `grouped=true`, else
-    to flat experience items. `total` is the full count before slicing.
+    to flat experience items. `total` is profile groups (grouped) or experience
+    drafts (flat). `experienceTotal` is always the full deduped experience count.
     """
     db = _db()
-    query: dict[str, Any] = {}
-    if handle:
-        query["handle"] = handle.strip().lstrip("@").lower()
-
-    posts = list(
-        db[settings.COL_POSTS]
-        .find(
-            query,
-            {
-                "source.raw": 0,
-                "contentHash": 0,
-            },
-        )
-        .sort([("postedAt", -1)])
-        .limit(1000)
-    )
-    handles = list({(p.get("handle") or "").lower() for p in posts if p.get("handle")})
-    profiles: dict[str, dict[str, Any]] = {}
-    if handles:
-        for a in db[settings.COL_ACCOUNTS].find(
-            {"handle": {"$in": handles}},
-            {"handle": 1, "profile.name": 1, "profile.website": 1},
-        ):
-            prof = a.get("profile") or {}
-            profiles[a["handle"]] = {
-                "name": prof.get("name"),
-                "website": prof.get("website"),
-            }
-
-    events = event_extract.extract_events(
-        posts,
+    events, profiles = _experience_drafts(
+        db,
+        handle=handle,
         min_score=min_score,
-        profiles=profiles,
         use_llm=llm,
-        ocr_allow_fetch=ocr_fetch,
+        ocr_fetch=ocr_fetch,
     )
     for event in events:
         event["postedAt"] = _iso(event.get("postedAt"))
@@ -503,6 +523,7 @@ def list_events(
         "model": settings.DEEPSEEK_MODEL if settings.DEEPSEEK_API_KEY else None,
         "refined": sum(1 for e in events if e.get("nameSource") == "deepseek"),
     }
+    experience_total = len(events)
 
     if grouped:
         groups = event_extract.group_by_handle(events)
@@ -513,16 +534,17 @@ def list_events(
         return {
             "grouped": True,
             "total": total,
+            "experienceTotal": experience_total,
             "limit": limit,
             "skip": skip,
             "llm": llm_meta,
             "profiles": page,
         }
 
-    total = len(events)
     return {
         "grouped": False,
-        "total": total,
+        "total": experience_total,
+        "experienceTotal": experience_total,
         "limit": limit,
         "skip": skip,
         "llm": llm_meta,

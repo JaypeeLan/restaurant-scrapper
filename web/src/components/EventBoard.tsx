@@ -144,17 +144,16 @@ export function EventBoard() {
   );
 
   const profiles = data?.profiles ?? [];
-  const experienceTotal = profiles.reduce(
-    (n, g) => n + (g.experienceCount ?? g.eventCount ?? 0),
-    0,
-  );
+  const experienceTotal =
+    data?.experienceTotal ??
+    profiles.reduce((n, g) => n + (g.experienceCount ?? g.eventCount ?? 0), 0);
 
   return (
     <Panel
       title="Experiences"
       hint={
         data
-          ? `${data.total} profiles · ${experienceTotal} experiences on this page`
+          ? `${experienceTotal} experiences · ${data.total} profiles`
           : undefined
       }
       action={
