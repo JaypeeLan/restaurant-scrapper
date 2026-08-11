@@ -3,6 +3,7 @@ import { api, useFetch } from './api';
 import { AccountTable } from './components/AccountTable';
 import { Loading } from './components/Common';
 import { EventBoard } from './components/EventBoard';
+import { TabGlossary } from './components/PageGlossary';
 import { PostFeed } from './components/PostFeed';
 import { SummaryBar } from './components/SummaryBar';
 
@@ -54,9 +55,29 @@ export default function App() {
   return (
     <div className="app">
       <header className="app__header">
-        <div className="app__brand">
-          <strong>Ingest</strong>
-          <small>Instagram posts</small>
+        <div className="app__header-top">
+          <div className="app__brand">
+            <strong>Ingest</strong>
+            <small>Instagram posts</small>
+          </div>
+
+          <div className="app__status" title={health?.db ? `database: ${health.db}` : undefined}>
+            {health ? (
+              health.ok ? (
+                <>
+                  <span className="status-dot status-dot--ok" aria-hidden />
+                  connected
+                </>
+              ) : (
+                <>
+                  <span className="status-dot status-dot--bad" aria-hidden />
+                  offline
+                </>
+              )
+            ) : (
+              <span className="spinner" aria-hidden />
+            )}
+          </div>
         </div>
 
         <nav className="tabs" aria-label="Views">
@@ -72,26 +93,6 @@ export default function App() {
             </button>
           ))}
         </nav>
-
-        <div className="app__spacer" />
-
-        <div className="app__status" title={health?.db ? `database: ${health.db}` : undefined}>
-          {health ? (
-            health.ok ? (
-              <>
-                <span className="status-dot status-dot--ok" aria-hidden />
-                connected
-              </>
-            ) : (
-              <>
-                <span className="status-dot status-dot--bad" aria-hidden />
-                offline
-              </>
-            )
-          ) : (
-            <span className="spinner" aria-hidden />
-          )}
-        </div>
       </header>
 
       <main className="app__main">
@@ -104,6 +105,7 @@ export default function App() {
             {tab === 'runs' && <RunStats />}
             {tab === 'capacity' && <CapacityMonitor />}
           </Suspense>
+          <TabGlossary tab={tab} />
         </div>
       </main>
     </div>
