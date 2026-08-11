@@ -26,7 +26,7 @@ the pending queue.
 ## Cron / long-running
 
 ```bash
-python main.py schedule --every 30 --discover-every 24 --discover-city lagos
+python main.py schedule --every 30 --discover-every 4 --discover-city lagos
 ```
 
 - Ingest due accounts every 30 minutes  

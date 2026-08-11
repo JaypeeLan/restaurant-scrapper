@@ -8,7 +8,7 @@ Blueprint: [`render.yaml`](../render.yaml)
 |---|---|---|---|
 | `ig-ingest-api` | Web (Free) | always on* | API + dashboard at `/` |
 | `ig-ingest-cron` | Cron (Starter) | every 30 min UTC | `python main.py ingest` |
-| `ig-discover-cron` | Cron (Starter) | daily 03:15 UTC | `python main.py discover --backend osm` |
+| `ig-discover-cron` | Cron (Starter) | every 4h UTC (`15 */4 * * *`) | `python main.py discover --backend osm --ingest-after` |
 
 Dashboard URL: **https://ig-ingest-api.onrender.com/**
 

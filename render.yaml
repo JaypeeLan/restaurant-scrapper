@@ -3,7 +3,7 @@
 # Deploys:
 #   1. Web API (Free)   → uvicorn + built dashboard at /
 #   2. Ingest cron      → every 30 min (Starter, billed while running)
-#   3. Discover cron    → daily 03:15 UTC (Starter, billed while running)
+#   3. Discover cron    → every 4h + ingest after seed (Starter)
 #
 # Environment group `ig-ingest-env` holds Mongo / cookies / DeepSeek secrets.
 # Keep INGEST_EVERY_MINUTES / DISCOVER_EVERY_HOURS in sync with the cron
@@ -43,9 +43,10 @@ services:
     region: oregon
     repo: https://github.com/JaypeeLan/restaurant-scrapper
     branch: main
-    schedule: "15 3 * * *"
-    buildCommand: bash scripts/build_discover.sh
-    startCommand: python main.py discover --backend osm
+    # :15 past 00/04/08/12/16/20 UTC — then ingest so new seeds are fetched now.
+    schedule: "15 */4 * * *"
+    buildCommand: bash scripts/build_cron.sh
+    startCommand: python main.py discover --backend osm --ingest-after
     envVars:
       - fromGroup: ig-ingest-env
 
@@ -79,7 +80,9 @@ envVarGroups:
       - key: INGEST_LIMIT
         value: "40"
       - key: DISCOVER_EVERY_HOURS
-        value: "24"
+        value: "4"
+      - key: DISCOVER_CRON_MINUTE
+        value: "15"
       - key: LOG_LEVEL
         value: INFO
       - key: IG_FALLBACK_MAX_PER_RUN

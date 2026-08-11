@@ -61,24 +61,38 @@ def _next_ingest_at(now: datetime | None = None) -> datetime:
 
 
 def _next_discover_at(now: datetime | None = None) -> datetime | None:
-    """Next discover fire time in UTC (daily wall-clock when every >= 24h)."""
+    """Next discover fire time in UTC (matches ``M */H * * *`` style cron)."""
     if settings.DISCOVER_EVERY_HOURS <= 0:
         return None
     now = now or _now()
-    hour = max(0, min(23, settings.DISCOVER_CRON_HOUR))
+    every_h = max(1, settings.DISCOVER_EVERY_HOURS)
     minute = max(0, min(59, settings.DISCOVER_CRON_MINUTE))
-    if settings.DISCOVER_EVERY_HOURS >= 24:
+    if every_h >= 24:
+        hour = max(0, min(23, settings.DISCOVER_CRON_HOUR))
         candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if candidate <= now:
             candidate += timedelta(days=1)
         return candidate
-    # Sub-daily: hour grid from midnight UTC.
+    for day_offset in (0, 1):
+        day = (now + timedelta(days=day_offset)).date()
+        for hour in range(0, 24, every_h):
+            candidate = datetime(
+                day.year, day.month, day.day, hour, minute, tzinfo=timezone.utc
+            )
+            if candidate > now:
+                return candidate
+    return None
+
+
+def _discover_cron_expr() -> str | None:
+    if settings.DISCOVER_EVERY_HOURS <= 0:
+        return None
+    minute = max(0, min(59, settings.DISCOVER_CRON_MINUTE))
     every_h = settings.DISCOVER_EVERY_HOURS
-    hour_epoch = int(now.timestamp()) // 3600
-    next_hour = ((hour_epoch // every_h) + 1) * every_h
-    return datetime.fromtimestamp(next_hour * 3600, tz=timezone.utc).replace(
-        minute=minute, second=0, microsecond=0
-    )
+    if every_h >= 24:
+        hour = max(0, min(23, settings.DISCOVER_CRON_HOUR))
+        return f"{minute} {hour} * * *"
+    return f"{minute} */{every_h} * * *"
 
 
 def _schedule_next() -> dict[str, Any]:
@@ -94,11 +108,7 @@ def _schedule_next() -> dict[str, Any]:
             max(0, int((nxt_discover - now).total_seconds())) if nxt_discover else None
         ),
         "ingestCron": f"*/{max(1, settings.INGEST_EVERY_MINUTES)} * * * *",
-        "discoverCron": (
-            f"{settings.DISCOVER_CRON_MINUTE} {settings.DISCOVER_CRON_HOUR} * * *"
-            if settings.DISCOVER_EVERY_HOURS > 0
-            else None
-        ),
+        "discoverCron": _discover_cron_expr(),
     }
 
 

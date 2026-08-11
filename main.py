@@ -6,7 +6,7 @@ CLI entrypoint.
     python main.py discover --city lagos
     python main.py capacity
     python main.py ingest --limit 200
-    python main.py schedule --every 30 --discover-every 24
+    python main.py schedule --every 30 --discover-every 4
 """
 
 from __future__ import annotations
@@ -199,6 +199,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
         print("  ✗ logged-in cookies required (cookies.txt) to resolve handles")
         return 1
 
+    discover_ok = True
     try:
         summary = run_discover(
             city=args.city,
@@ -211,23 +212,36 @@ def cmd_discover(args: argparse.Namespace) -> int:
         )
     except Exception as exc:  # noqa: BLE001
         print(f"  ✗ {exc}")
-        return 1
+        discover_ok = False
+        if not (args.ingest_after and not args.dry_run):
+            return 1
+        log.warning("discover failed; still running post-discover ingest")
+    else:
+        print(f"city:            {summary.get('city')}")
+        print(f"places found:    {summary.get('placesFound')}")
+        if summary.get("dryRun"):
+            print("dry-run sample:")
+            for row in summary.get("sample") or []:
+                print(f"  - {row.get('name')}  ig={row.get('ig')}")
+            return 0
+        print(f"places upserted: {summary.get('placesUpserted')}")
+        print(f"resolve tried:   {summary.get('resolveAttempted')}")
+        print(f"resolved:        {summary.get('resolved')}")
+        print(f"skipped:         {summary.get('skipped')}")
+        print(f"seeded:          {summary.get('seeded')}")
+        for h in summary.get("handles") or []:
+            print(f"  @{h}")
 
-    print(f"city:            {summary.get('city')}")
-    print(f"places found:    {summary.get('placesFound')}")
-    if summary.get("dryRun"):
-        print("dry-run sample:")
-        for row in summary.get("sample") or []:
-            print(f"  - {row.get('name')}  ig={row.get('ig')}")
-        return 0
-    print(f"places upserted: {summary.get('placesUpserted')}")
-    print(f"resolve tried:   {summary.get('resolveAttempted')}")
-    print(f"resolved:        {summary.get('resolved')}")
-    print(f"skipped:         {summary.get('skipped')}")
-    print(f"seeded:          {summary.get('seeded')}")
-    for h in summary.get("handles") or []:
-        print(f"  @{h}")
-    return 0
+    if args.ingest_after and not args.dry_run:
+        from run_ingest import ingest
+
+        log.info("post-discover ingest starting")
+        try:
+            asyncio.run(ingest(limit=args.ingest_limit, tier=None, dry_run=False))
+        except Exception as exc:  # noqa: BLE001
+            log.error("post-discover ingest failed: %s", exc)
+            return 1
+    return 0 if discover_ok else 1
 
 
 def cmd_schedule(args: argparse.Namespace) -> int:
@@ -252,6 +266,11 @@ def cmd_schedule(args: argparse.Namespace) -> int:
             log.info("discover job done: %s", summary)
         except Exception as exc:  # noqa: BLE001
             log.error("discover job failed: %s", exc)
+        try:
+            log.info("post-discover ingest starting")
+            asyncio.run(ingest(limit=args.limit, tier=None, dry_run=False))
+        except Exception as exc:  # noqa: BLE001
+            log.error("post-discover ingest failed: %s", exc)
 
     scheduler.add_job(
         ingest_job, "interval", minutes=args.every, max_instances=1, coalesce=True
@@ -267,7 +286,7 @@ def cmd_schedule(args: argparse.Namespace) -> int:
         scheduler.add_job(discover_job, "date")
 
     log.info(
-        "scheduler started — ingest every %d min (limit %d); discover every %s h",
+        "scheduler started — ingest every %d min (limit %d); discover every %s h (+ ingest after)",
         args.every,
         args.limit,
         args.discover_every if args.discover_every > 0 else "off",
@@ -318,6 +337,17 @@ def main() -> int:
     p_disc.add_argument("--min-score", type=float, default=None)
     p_disc.add_argument("--no-seed", action="store_true")
     p_disc.add_argument("--dry-run", action="store_true")
+    p_disc.add_argument(
+        "--ingest-after",
+        action="store_true",
+        help="run one ingest cycle after seeding (picks up new handles immediately)",
+    )
+    p_disc.add_argument(
+        "--ingest-limit",
+        type=int,
+        default=settings.INGEST_LIMIT,
+        help="account cap for --ingest-after",
+    )
     p_disc.set_defaults(func=cmd_discover)
 
     sub.add_parser("capacity", help="project daily calls vs rate ceiling").set_defaults(
