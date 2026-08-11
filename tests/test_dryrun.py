@@ -310,6 +310,26 @@ def test_event_extract() -> None:
         is None,
     )
 
+    park = (
+        "Fun doesn't wait for the weekend\n"
+        "From Monday to Sunday, our park is open for everyone, kids and adults alike.\n"
+        "Exciting rides\nSnacks & chill zones\nUnlimited fun\n"
+        "#familytime #allweekfunweek #parkvibes"
+    )
+    check("park open-hours promo is not an experience", event_extract.extract_from_text(park) is None)
+
+    sunday = (
+        "Your Sunday should be effortless. Start by booking it this Today.\n"
+        "The Details:\n📅 Every Sunday | 12:30 PM - 4:00 PM\n"
+        "🥂 ₦75,000 — Food & Alcohol\n"
+        "#ShiroLagos #SundayBrunchAffair #TasteOfShiro"
+    )
+    check(
+        "sunday brunch uses hashtag not 'Your Sunday'",
+        "brunch" in event_extract._experience_name(sunday).lower(),
+        event_extract._experience_name(sunday),
+    )
+
     post = {
         "_id": "shirolagos:abc",
         "handle": "shirolagos",
@@ -518,6 +538,48 @@ The Details:
             ((ferrari_draft.get("experience") or {}).get("name") or "").lower()
             == "ferrari friday",
             (ferrari_draft.get("experience") or {}).get("name"),
+        )
+
+    tepp_caption = (
+        "You say Hibachi. We say Teppanyaki.\n"
+        "Teppanyaki Seatings:\n"
+        "Monday: Closed\n"
+        "Tuesday to Friday: 3:00 PM to 5:00 PM\n"
+        "#ShiroLagos #Teppanyaki"
+    )
+    check(
+        "schedule status is not a name",
+        event_extract._is_bad_experience_name("Closed Tuesday"),
+    )
+    check(
+        "teppanyaki beats Closed Tuesday",
+        event_extract._experience_name(tepp_caption).lower() == "teppanyaki",
+        event_extract._experience_name(tepp_caption),
+    )
+    tepp_draft = event_extract.experience_from_post(
+        {
+            "_id": "shirolagos:DbAmVuCuw_Q",
+            "handle": "shirolagos",
+            "caption": (
+                "The only acceptable form of martial 'culinary' art.\n"
+                "You say Hibachi. We say Teppanyaki.\n"
+                "Teppanyaki Seatings:\n"
+                "Monday: Closed\n"
+                "Tuesday to Friday: 3:00 PM to 5:00 PM | 7:30 PM to 9:30 PM\n"
+                "Saturday to Sunday: 1:00 PM to 3:30 PM\n"
+                "Secure your front-row seat: Link in bio\n"
+                "#ShiroLagos #Teppanyaki"
+            ),
+        },
+        use_card_ocr=False,
+        use_llm=False,
+    )
+    check("teppanyaki draft qualifies", tepp_draft is not None)
+    if tepp_draft:
+        check(
+            "teppanyaki draft name",
+            ((tepp_draft.get("experience") or {}).get("name") or "").lower() == "teppanyaki",
+            (tepp_draft.get("experience") or {}).get("name"),
         )
 
 
