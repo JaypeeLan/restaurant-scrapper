@@ -22,3 +22,6 @@ web/dist/
 
 # local scratch
 handles.txt
+docs/sample_payloads/
+docs/sample_payloads.zip
+docs/sample_source_payloads.txt

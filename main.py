@@ -3,7 +3,8 @@ CLI entrypoint.
 
     python main.py preflight
     python main.py seed --file handles.txt
-    python main.py discover --city lagos
+    python main.py discover --city lagos --backend enrich
+    python main.py discover-events --sources reisty,tix
     python main.py capacity
     python main.py ingest --limit 200
     python main.py schedule --every 30 --discover-every 4
@@ -77,7 +78,12 @@ def cmd_preflight(_: argparse.Namespace) -> int:
     print(
         "  ✓ google places configured"
         if settings.GOOGLE_PLACES_API_KEY
-        else "  ! google places not set — discover uses free OSM Overpass"
+        else "  ! google places not set — enrich still uses FlavorQueste/Reisty (+ OSM)"
+    )
+    print(
+        "  ✓ reisty api key set"
+        if settings.REISTY_API_KEY
+        else "  ! REISTY_API_KEY missing — restaurant/event enrich skips Reisty"
     )
     return 0
 
@@ -477,6 +483,37 @@ def cmd_discover(args: argparse.Namespace) -> int:
     return 0 if discover_ok else 1
 
 
+def cmd_discover_events(args: argparse.Namespace) -> int:
+    """Pull organizer/restaurant events from Reisty + Tix into Mongo."""
+    from discover.run_events import run_discover_events
+
+    sources = [s.strip() for s in (args.sources or "reisty,tix").split(",") if s.strip()]
+    try:
+        summary = run_discover_events(
+            sources=sources,
+            limit=args.limit,
+            dry_run=args.dry_run,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ✗ {exc}")
+        return 1
+
+    print(f"sources:       {', '.join(summary.get('sources') or [])}")
+    print(f"events found:  {summary.get('eventsFound')}")
+    if summary.get("dryRun"):
+        print("dry-run sample:")
+        for row in summary.get("sample") or []:
+            print(
+                f"  - [{row.get('source')}] {row.get('name')}  "
+                f"{row.get('startsAt')}  {row.get('address')}"
+            )
+        return 0
+    print(f"upserted:      {summary.get('upserted')}")
+    for err in summary.get("errors") or []:
+        print(f"  ! {err}")
+    return 1 if summary.get("errors") and not summary.get("eventsFound") else 0
+
+
 def cmd_schedule(args: argparse.Namespace) -> int:
     from apscheduler.schedulers.blocking import BlockingScheduler
 
@@ -585,7 +622,7 @@ def main() -> int:
 
     p_disc = sub.add_parser(
         "discover",
-        help="auto: Places (OSM/Google) → IG handles → seed accounts",
+        help="Places (FlavorQueste/Reisty/Google/OSM) → IG handles → seed accounts",
     )
     p_disc.add_argument("--city", default=settings.DISCOVER_CITY, help="lagos | abuja")
     p_disc.add_argument("--place-limit", type=int, default=settings.DISCOVER_PLACE_LIMIT)
@@ -595,7 +632,12 @@ def main() -> int:
         default=settings.DISCOVER_RESOLVE_LIMIT,
         help="max IG searches this run",
     )
-    p_disc.add_argument("--backend", choices=["auto", "osm", "google"], default="auto")
+    p_disc.add_argument(
+        "--backend",
+        choices=["auto", "osm", "google", "flavorqueste", "reisty", "enrich"],
+        default=settings.PLACES_BACKEND,
+        help="enrich=FQ+Reisty(+maps); auto=google|osm",
+    )
     p_disc.add_argument("--min-score", type=float, default=None)
     p_disc.add_argument("--no-seed", action="store_true")
     p_disc.add_argument("--dry-run", action="store_true")
@@ -611,6 +653,19 @@ def main() -> int:
         help="account cap for --ingest-after",
     )
     p_disc.set_defaults(func=cmd_discover)
+
+    p_ev = sub.add_parser(
+        "discover-events",
+        help="pull Lagos events from Reisty + Tix into external_events",
+    )
+    p_ev.add_argument(
+        "--sources",
+        default="reisty,tix",
+        help="comma list: reisty,tix,all",
+    )
+    p_ev.add_argument("--limit", type=int, default=settings.DISCOVER_EVENTS_LIMIT)
+    p_ev.add_argument("--dry-run", action="store_true")
+    p_ev.set_defaults(func=cmd_discover_events)
 
     sub.add_parser("capacity", help="project daily calls vs rate ceiling").set_defaults(
         func=cmd_capacity

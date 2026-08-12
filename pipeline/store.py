@@ -69,6 +69,11 @@ def ensure_indexes(db) -> None:
     db[settings.COL_PLACES].create_index([("city", ASCENDING), ("handleStatus", ASCENDING)])
     db[settings.COL_PLACES].create_index([("name", ASCENDING)])
     db[settings.COL_PLACES].create_index([("instagramHandle", ASCENDING)], sparse=True)
+    db[settings.COL_PLACES].create_index([("source", ASCENDING)])
+
+    db[settings.COL_EXTERNAL_EVENTS].create_index([("startsAt", ASCENDING)])
+    db[settings.COL_EXTERNAL_EVENTS].create_index([("source", ASCENDING), ("startsAt", ASCENDING)])
+    db[settings.COL_EXTERNAL_EVENTS].create_index([("name", ASCENDING)])
 
 
 def upsert_places(db, places: list[dict[str, Any]]) -> int:
@@ -99,6 +104,33 @@ def upsert_places(db, places: list[dict[str, Any]]) -> int:
     if not ops:
         return 0
     result = db[settings.COL_PLACES].bulk_write(ops, ordered=False)
+    return result.upserted_count
+
+
+def upsert_external_events(db, events: list[dict[str, Any]]) -> int:
+    """Upsert organizer / restaurant events from Reisty, Tix, etc."""
+    if not events:
+        return 0
+    ops: list[UpdateOne] = []
+    for ev in events:
+        eid = ev.get("_id")
+        if not eid:
+            continue
+        payload = {k: v for k, v in ev.items() if k != "_id"}
+        payload["updatedAt"] = _now()
+        ops.append(
+            UpdateOne(
+                {"_id": eid},
+                {
+                    "$set": payload,
+                    "$setOnInsert": {"firstSeenAt": _now()},
+                },
+                upsert=True,
+            )
+        )
+    if not ops:
+        return 0
+    result = db[settings.COL_EXTERNAL_EVENTS].bulk_write(ops, ordered=False)
     return result.upserted_count
 
 

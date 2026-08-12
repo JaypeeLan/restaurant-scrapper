@@ -132,11 +132,18 @@ IG_HANDLE_MIN_SCORE: float = float(_str("IG_HANDLE_MIN_SCORE", "0.55") or "0.55"
 IG_SEARCH_GAP_S: float = float(_str("IG_SEARCH_GAP_S", "2.5") or "2.5")
 COL_HANDLE_CANDIDATES: str = _str("IG_COL_HANDLE_CANDIDATES", "ig_handle_candidates")
 COL_PLACES: str = _str("IG_COL_PLACES", "places_raw")
+COL_EXTERNAL_EVENTS: str = _str("IG_COL_EXTERNAL_EVENTS", "external_events")
 
 # ── Venue discovery (Places → Instagram handles) ──────────────────────────────
-# auto = Google if GOOGLE_PLACES_API_KEY set, else free OpenStreetMap Overpass
-PLACES_BACKEND: str = _str("PLACES_BACKEND", "auto")
+# auto = Google if key else OSM
+# enrich = FlavorQueste + Reisty (+ Google/OSM) — denser Lagos restaurant data
+PLACES_BACKEND: str = _str("PLACES_BACKEND", "enrich")
 GOOGLE_PLACES_API_KEY: str = _str("GOOGLE_PLACES_API_KEY", "")
+# Public client key shipped in Reisty's SPA (guest endpoints require apiKey header).
+REISTY_API_KEY: str = _str(
+    "REISTY_API_KEY",
+    "93443138-ba3a-4e8d-98ae-d7a1020ccc35",
+)
 OVERPASS_URL: str = _str(
     "OVERPASS_URL",
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
@@ -144,6 +151,7 @@ OVERPASS_URL: str = _str(
 DISCOVER_CITY: str = _str("DISCOVER_CITY", "lagos")
 DISCOVER_PLACE_LIMIT: int = _int("DISCOVER_PLACE_LIMIT", 150)
 DISCOVER_RESOLVE_LIMIT: int = _int("DISCOVER_RESOLVE_LIMIT", 40)
+DISCOVER_EVENTS_LIMIT: int = _int("DISCOVER_EVENTS_LIMIT", 100)
 
 # ── Scheduler cadence (local `schedule` CLI + UI; Render cron should match) ────
 INGEST_EVERY_MINUTES: int = _int("INGEST_EVERY_MINUTES", 30)
