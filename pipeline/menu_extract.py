@@ -90,6 +90,9 @@ Rules:
 - Prefer real dish/drink names. Deduplicate near-identical names.
 - Ignore slides that are only marketing slogans / reservation CTAs with no dish list.
 - OCR is noisy — fix obvious typos when confident.
+- Two-column drink menus list Glass and Bottle. Use the Bottle Naira amount as price
+  when both are printed; put the glass price in description (e.g. "glass ₦3,000").
+- Section titles (HOUSE COCKTAILS, BOGOPAINTTAIL, WHITE WINES) are not items.
 """
 
 
@@ -302,7 +305,7 @@ def ocr_slide_urls(slides: list[dict[str, Any]], *, max_slides: int | None = Non
         text = ""
         if url:
             try:
-                text = ocr_url(str(url), cache_key=f"highlight-slide:{sid}", allow_fetch=True) or ""
+                text = ocr_url(str(url), cache_key=f"highlight-slide:v2:{sid}", allow_fetch=True) or ""
             except Exception as exc:  # noqa: BLE001
                 log.debug("slide OCR failed %s: %s", sid, exc)
                 text = ""
@@ -407,7 +410,7 @@ def extract_menu_from_ocr(
         chunks: list[str] = []
         for slide in batch:
             text = (slide.get("ocrText") or "").strip()
-            chunks.append(f"--- slide {slide.get('order', '?')} ---\n{text[:2800]}")
+            chunks.append(f"--- slide {slide.get('order', '?')} ---\n{text[:8000]}")
         blob = "\n\n".join(chunks)
         if len(blob) > 24000:
             blob = blob[:24000] + "\n\n[truncated]"
@@ -556,7 +559,7 @@ def extract_highlight_menu(
                 "order": s.get("order"),
                 "mediaType": s.get("mediaType"),
                 "imageUrl": s.get("imageUrl"),
-                "ocrText": (s.get("ocrText") or "")[:4000],
+                "ocrText": (s.get("ocrText") or "")[:16000],
                 "qrUrls": s.get("qrUrls") or [],
             }
             for s in slides

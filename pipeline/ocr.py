@@ -154,6 +154,29 @@ def _merge_ocr_passes(texts: list[str]) -> str:
     return "\n".join(out)
 
 
+def _ocr_columns(image: Image.Image) -> str:
+    """
+    Story menus are often two columns (cocktails | wines). Full-frame OCR
+    weaves the columns together and drops prices; split and read each side.
+    """
+    w, h = image.size
+    if h < int(w * 1.15) or w < 200:
+        return ""
+    mid = w // 2
+    pad = max(8, w // 30)
+    chunks: list[str] = []
+    try:
+        import pytesseract
+    except ImportError:
+        return ""
+    for box in ((0, 0, mid + pad, h), (max(0, mid - pad), 0, w, h)):
+        col = image.crop(box)
+        text = pytesseract.image_to_string(col, config="--psm 4") or ""
+        if text.strip():
+            chunks.append(text.strip())
+    return "\n\n".join(chunks)
+
+
 def _stitch_split_title_lines(text: str) -> str:
     """
     Flyer titles sometimes OCR as TEPPAN / YAKI or TEP / PANT AKI.
@@ -224,6 +247,8 @@ def ocr_image_bytes(data: bytes) -> str:
         pytesseract.image_to_string(warm, config="--psm 6") or "",
         pytesseract.image_to_string(warm_bw, config="--psm 6") or "",
         pytesseract.image_to_string(gray, config="--psm 11") or "",
+        pytesseract.image_to_string(gray, config="--psm 4") or "",
+        _ocr_columns(gray),
     ]
     merged = _merge_ocr_passes(passes)
     return _stitch_split_title_lines(merged)
