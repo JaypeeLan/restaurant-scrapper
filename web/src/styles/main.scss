@@ -820,6 +820,11 @@ a {
   margin-top: $s-4;
   padding-left: $s-3;
 
+  .panel > & {
+    margin-top: 0;
+    margin-bottom: $s-4;
+  }
+
   &--warn {
     border-left-color: $warn;
     color: $warn;
@@ -976,9 +981,10 @@ a {
   }
 
   &__sources {
+    align-items: center;
     border-top: 1px solid $border;
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
     gap: $s-2;
     padding: $s-2 $s-4 $s-3;
 
@@ -1023,10 +1029,11 @@ a {
 
 .menu-source-list {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: $s-2;
   list-style: none;
   margin: 0;
+  min-width: 0;
   padding: 0;
 }
 
@@ -1036,12 +1043,13 @@ a {
   border: 1px solid $border;
   border-radius: $r-sm;
   color: inherit;
-  display: flex;
-  flex-wrap: wrap;
-  gap: $s-2;
-  padding: $s-2 $s-3;
+  display: inline-flex;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 8px;
   text-decoration: none;
   transition: border-color 0.12s ease, background 0.12s ease;
+  white-space: nowrap;
 
   &:hover {
     background: rgba($accent, 0.04);
@@ -1062,7 +1070,8 @@ a {
   &__label {
     color: $text-muted;
     font-size: $fs-xs;
-    overflow-wrap: anywhere;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 
@@ -1070,6 +1079,23 @@ a {
   display: flex;
   flex-direction: column;
   gap: $s-2;
+
+  &__head {
+    align-items: center;
+    background: transparent;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    display: flex;
+    gap: $s-2;
+    padding: 0;
+    text-align: left;
+    width: 100%;
+
+    &:hover .menu-section__title {
+      color: $text;
+    }
+  }
 
   &__title {
     color: $text-faint;
@@ -1079,6 +1105,19 @@ a {
     letter-spacing: 0.06em;
     margin: 0;
     text-transform: uppercase;
+  }
+
+  &__count {
+    color: $text-faint;
+    font-size: $fs-xs;
+    margin-left: auto;
+  }
+
+  &__chev {
+    @include mono;
+    color: $text-faint;
+    flex-shrink: 0;
+    font-size: $fs-xs;
   }
 
   &__items {
@@ -1132,6 +1171,11 @@ a {
     font-weight: 600;
     flex-shrink: 0;
     white-space: nowrap;
+
+    &--missing {
+      color: $text-faint;
+      font-weight: 500;
+    }
   }
 }
 

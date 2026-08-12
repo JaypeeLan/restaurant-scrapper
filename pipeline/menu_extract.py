@@ -266,9 +266,13 @@ def menu_items_from_llm(
             str(row.get("type") or "") if row.get("type") is not None else None,
             category,
         )
-        price = _normalize_naira_price(_parse_price(row.get("price")))
-        section = re.sub(r"\s+", " ", str(row.get("section") or "")).strip()[:80]
         desc = re.sub(r"\s+", " ", str(row.get("description") or "")).strip()[:400]
+        price = _normalize_naira_price(_parse_price(row.get("price")))
+        if price is None:
+            blob = f"{name} {desc}".strip()
+            if re.search(r"(?:₦|NGN|\bN)\s*[\d,]+|\b\d{1,3}(?:,\d{3})+\b", blob, re.I):
+                price = _normalize_naira_price(_parse_price(blob))
+        section = re.sub(r"\s+", " ", str(row.get("section") or "")).strip()[:80]
         out.append(
             {
                 "_id": f"igmenu:{restaurant}:{tray_id}:{_slug_id(name, section)}",
@@ -511,6 +515,35 @@ def extract_highlight_menu(
         slides=slides,
     )
 
+    qr_urls: list[str] = []
+    qr_menu_url: str | None = None
+    try:
+        from pipeline import qr_menu
+        from pipeline.menu_merge import merge_menu_items
+
+        qr_urls = qr_menu.qr_urls_from_slides(slides)
+        if qr_urls:
+            qr_text, qr_menu_url, _file_urls = qr_menu.price_text_from_qr_urls(qr_urls)
+            if qr_text:
+                qr_items = extract_menu_from_text(
+                    handle=handle,
+                    source_id=f"{tray_id}:qr",
+                    source_title=f"{title or 'Menu'} prices",
+                    text=qr_text,
+                    source_kind="qr_folder",
+                )
+                if qr_items:
+                    items = merge_menu_items(qr_items, items)
+                    log.info(
+                        "[menu] @%s tray %s QR prices → %d items (from %d highlight names)",
+                        handle,
+                        tray_id,
+                        sum(1 for i in items if (i.get("price") or 0) > 0),
+                        len(items),
+                    )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("[menu] QR price follow failed @%s %s: %s", handle, tray_id, exc)
+
     payload = {
         "handle": handle,
         "trayId": tray_id,
@@ -524,6 +557,7 @@ def extract_highlight_menu(
                 "mediaType": s.get("mediaType"),
                 "imageUrl": s.get("imageUrl"),
                 "ocrText": (s.get("ocrText") or "")[:4000],
+                "qrUrls": s.get("qrUrls") or [],
             }
             for s in slides
         ],
@@ -531,6 +565,7 @@ def extract_highlight_menu(
         "menuItemCount": len(items),
         "menuExtractedAt": _now(),
         "menuStatus": "ok" if items else "empty",
+        "qrMenuUrl": qr_menu_url,
         "updatedAt": _now(),
     }
     store.upsert_highlight_menu(db, doc_id, payload)

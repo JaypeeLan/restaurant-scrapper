@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { api, useDebounced, useFetch } from '../api';
-import { formatNaira } from '../lib/naira';
+import { formatNaira, normalizeNairaAmount } from '../lib/naira';
 import type { Highlight, HighlightProfile, MenuItem } from '../types';
 import { Empty, ErrorState, Loading, Panel } from './Common';
 
@@ -13,6 +13,7 @@ function formatCategory(category: string): string {
 function groupBySection(items: MenuItem[]): { section: string; items: MenuItem[] }[] {
   const map = new Map<string, MenuItem[]>();
   for (const item of items) {
+    if (normalizeNairaAmount(item.price) == null) continue;
     const key = (item.section || item.category || 'Other').trim() || 'Other';
     const list = map.get(key);
     if (list) list.push(item);
@@ -103,6 +104,8 @@ function MenuTraySources({ sources }: { sources: MenuSourceLinkView[] }) {
 }
 
 function MenuItemRow({ row }: { row: MenuItem }) {
+  const price = formatNaira(row.price);
+  const missing = price === '—';
   return (
     <div className="menu-item">
       <div className="menu-item__main">
@@ -113,16 +116,49 @@ function MenuItemRow({ row }: { row: MenuItem }) {
           <span className="badge badge--muted">{formatCategory(row.category)}</span>
         </div>
       </div>
-      <div className="menu-item__price" title="Price (₦)">{formatNaira(row.price)}</div>
+      <div
+        className={`menu-item__price${missing ? ' menu-item__price--missing' : ''}`}
+        title={missing ? 'Price not listed on the source menu' : 'Price (₦)'}
+      >
+        {missing ? 'Not listed' : price}
+      </div>
     </div>
   );
 }
 
+function MenuSection({ section, items }: { section: string; items: MenuItem[] }) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <section className={`menu-section${open ? ' menu-section--open' : ''}`}>
+      <button
+        type="button"
+        className="menu-section__head"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <h4 className="menu-section__title">{section}</h4>
+        <span className="menu-section__count">
+          {items.length} item{items.length === 1 ? '' : 's'}
+        </span>
+        <span className="menu-section__chev" aria-hidden="true">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div className="menu-section__items">
+          {items.map((row) => (
+            <MenuItemRow key={row._id} row={row} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function HighlightTray({ item }: { item: Highlight }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const menuItems = item.menuItems ?? [];
-  const count = item.menuItemCount ?? menuItems.length;
   const sections = useMemo(() => groupBySection(menuItems), [menuItems]);
+  const count = sections.reduce((n, s) => n + s.items.length, 0);
   const title = item.title?.trim() || 'Untitled tray';
   const sources = useMemo(() => menuSources(item), [item]);
 
@@ -157,22 +193,15 @@ function HighlightTray({ item }: { item: Highlight }) {
 
       {open && (
         <div className="menu-tray__body">
-          {menuItems.length === 0 ? (
+          {count === 0 ? (
             <p className="menu-tray__empty">
               {item.sourceType === 'web'
-                ? 'Menu link found but items not extracted yet — PDF may be image-only or backfill pending.'
-                : 'Items not extracted yet — tray may be video-only or waiting for the weekly menu backfill.'}
+                ? 'Menu link found but no priced items — the page may list dishes without prices.'
+                : 'No priced items yet — tray may be video-only or waiting for the weekly menu backfill.'}
             </p>
           ) : (
             sections.map((sec) => (
-              <section key={sec.section} className="menu-section">
-                <h4 className="menu-section__title">{sec.section}</h4>
-                <div className="menu-section__items">
-                  {sec.items.map((row) => (
-                    <MenuItemRow key={row._id} row={row} />
-                  ))}
-                </div>
-              </section>
+              <MenuSection key={sec.section} section={sec.section} items={sec.items} />
             ))
           )}
         </div>
@@ -257,6 +286,10 @@ export function MenuBoard() {
         </button>
       }
     >
+      <p className="note">
+        Website and Linktree menus take priority over Instagram highlights — including
+        item names and prices. Items with no listed price are omitted.
+      </p>
       <div className="filters">
         <div className="filters__field">
           <label htmlFor="menu-handle">Restaurant</label>

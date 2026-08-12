@@ -58,11 +58,24 @@ class WebMenuSource:
 
 
 class _TextHTMLParser(HTMLParser):
+    _SKIP = {"script", "style", "noscript", "svg"}
+
     def __init__(self) -> None:
         super().__init__()
         self._chunks: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self._SKIP:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._SKIP and self._skip_depth:
+            self._skip_depth -= 1
 
     def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
         text = data.strip()
         if text:
             self._chunks.append(text)
@@ -534,8 +547,9 @@ def backfill_web_menus(
         else:
             status = "error"
 
+        priced = [i for i in items if float(i.get("price") or 0) > 0]
         clear_web_menus_for_handle(db, handle_key)
-        if not items:
+        if not priced:
             stats["updated"] += 1
             processed += 1
             if status == "error":
@@ -543,12 +557,15 @@ def backfill_web_menus(
             else:
                 stats["empty"] += 1
             log.info(
-                "[web-menu] @%s no items from %s — not stored (%s)",
+                "[web-menu] @%s no priced items from %s — not stored (%s, %d names)",
                 handle_key,
                 src.url[:80],
                 status,
+                len(items),
             )
             continue
+        items = priced
+        status = "ok"
 
         payload = {
             "handle": handle_key,

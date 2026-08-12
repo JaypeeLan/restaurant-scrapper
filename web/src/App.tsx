@@ -4,9 +4,7 @@ import { AccountTable } from './components/AccountTable';
 import { Loading } from './components/Common';
 import { EventBoard } from './components/EventBoard';
 import { MenuBoard } from './components/MenuBoard';
-import { TabGlossary } from './components/PageGlossary';
 import { PostFeed } from './components/PostFeed';
-import { SummaryBar } from './components/SummaryBar';
 
 // Recharts is ~380 kB of the bundle and only two of the four tabs need it.
 // Lazy-loading keeps the default Posts view fast on first paint.
@@ -99,7 +97,6 @@ export default function App() {
 
       <main className="app__main">
         <div className="stack">
-          <SummaryBar />
           {tab === 'events' && <EventBoard />}
           {tab === 'menus' && <MenuBoard />}
           {tab === 'posts' && <PostFeed />}
@@ -108,7 +105,6 @@ export default function App() {
             {tab === 'runs' && <RunStats />}
             {tab === 'capacity' && <CapacityMonitor />}
           </Suspense>
-          <TabGlossary tab={tab} />
         </div>
       </main>
     </div>

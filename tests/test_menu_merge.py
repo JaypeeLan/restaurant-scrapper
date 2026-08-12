@@ -60,9 +60,46 @@ def test_collapse_profile_menus_one_card() -> None:
     assert merged[0]["menuItems"][0]["price"] == 4500
 
 
-def test_collapse_hides_empty() -> None:
-    from pipeline.menu_merge import collapse_profile_menus
+def test_merge_keeps_priced_duplicate() -> None:
+    ig = [
+        {"itemName": "Soup", "price": 0},
+        {"itemName": "Soup", "price": 3000},
+    ]
+    merged = merge_menu_items([], ig)
+    assert len(merged) == 1
+    assert merged[0]["price"] == 3000
 
+
+def test_merge_unpriced_web_does_not_wipe_ig() -> None:
+    ig = [{"itemName": "Jollof Rice", "price": 5000}]
+    web = [{"itemName": "Jollof Rice", "price": 0, "description": "Smoky"}]
+    merged = merge_menu_items(web, ig)
+    assert merged[0]["price"] == 5000
+    assert merged[0]["description"] == "Smoky"
+
+
+def test_collapse_drops_unpriced() -> None:
+    trays = [
+        {
+            "id": "foo:web:abc",
+            "title": "Menu",
+            "sourceType": "web",
+            "kind": "menu",
+            "menuUrl": "https://example.com/menu",
+            "menuItems": [
+                {"itemName": "Soup", "price": 4500},
+                {"itemName": "Mystery", "price": 0},
+            ],
+            "menuItemCount": 2,
+        },
+    ]
+    merged = collapse_profile_menus(trays)
+    assert len(merged) == 1
+    assert merged[0]["menuItemCount"] == 1
+    assert merged[0]["menuItems"][0]["itemName"] == "Soup"
+
+
+def test_collapse_hides_empty() -> None:
     trays = [
         {
             "id": "foo:web:empty",

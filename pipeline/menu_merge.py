@@ -75,17 +75,46 @@ def tray_source_links(tray: dict[str, Any]) -> list[dict[str, str]]:
                 "origin": "highlight",
             }
         )
+    qr_url = (tray.get("qrMenuUrl") or "").strip()
+    if qr_url:
+        out.insert(
+            0,
+            {
+                "type": "Price list",
+                "label": "QR folder",
+                "href": qr_url,
+                "origin": "web",
+            },
+        )
     return out
 
 
+def _item_price(item: dict[str, Any]) -> float:
+    try:
+        return float(item.get("price") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _keep_priced(current: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    """Never replace a priced row with an unpriced duplicate."""
+    if _item_price(current) > 0:
+        return current
+    if _item_price(incoming) > 0:
+        return dict(incoming)
+    return current
+
+
 def _merge_item(external: dict[str, Any], other: dict[str, Any]) -> dict[str, Any]:
-    """External source fields win on overlap."""
+    """External source fields win on overlap — except a missing price."""
     out = dict(other)
     for key in ("itemName", "price", "description", "category", "type", "section"):
         val = external.get(key)
         if val is None or val == "" or val == 0:
             continue
         out[key] = val
+    if _item_price(out) <= 0 and _item_price(other) > 0:
+        out["price"] = other.get("price")
     return out
 
 
@@ -94,7 +123,8 @@ def merge_menu_items(
     other_items: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """
-    Union items by normalized name. External rows override name/price on match.
+    Union items by normalized name. External rows override name/price on match
+    when the external row actually has a price.
     """
     by_key: dict[str, dict[str, Any]] = {}
     order: list[str] = []
@@ -105,7 +135,9 @@ def merge_menu_items(
             continue
         if key not in by_key:
             order.append(key)
-        by_key[key] = dict(item)
+            by_key[key] = dict(item)
+        else:
+            by_key[key] = _keep_priced(by_key[key], item)
 
     for item in external_items:
         key = _item_name_key(item.get("itemName"))
@@ -201,7 +233,9 @@ def collapse_profile_menus(trays: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for t in ig_trays:
         ig_items.extend(t.get("menuItems") or [])
 
-    items = merge_menu_items(web_items, ig_items)
+    items = [i for i in merge_menu_items(web_items, ig_items) if _item_price(i) > 0]
+    if not items:
+        return []
     primary["menuItems"] = items
     primary["menuItemCount"] = len(items)
     primary["title"] = "Menu"
