@@ -409,6 +409,12 @@ a {
     gap: $s-2;
     min-height: 2.5rem;
     padding-bottom: 2px;
+
+    @include below($bp-sm) {
+      align-self: flex-start;
+      flex: 1 1 100%;
+      min-height: 44px;
+    }
   }
 }
 
@@ -841,63 +847,103 @@ a {
   gap: $s-4;
 }
 
-.menu-grid {
-  display: grid;
-  gap: $s-3;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  padding: $s-4;
+.menu-board {
+  display: flex;
+  flex-direction: column;
+  gap: $s-4;
 }
 
-.menu-card {
+.menu-profile {
+  background: $bg-raised;
+  border: 1px solid $border;
+  border-radius: $r-lg;
+  overflow: hidden;
+
+  &__head {
+    align-items: center;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    font: inherit;
+    gap: $s-3;
+    justify-content: space-between;
+    min-height: 52px;
+    padding: $s-4;
+    text-align: left;
+    width: 100%;
+
+    &:hover {
+      background: rgba($accent, 0.04);
+    }
+  }
+
+  &__info {
+    min-width: 0;
+  }
+
+  &__handle {
+    font-family: $font-ui;
+    font-size: $fs-md;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  &__sub {
+    color: $text-muted;
+    font-size: $fs-sm;
+    margin-top: 2px;
+  }
+
+  &__chev {
+    @include mono;
+    color: $text-faint;
+    flex-shrink: 0;
+  }
+}
+
+.menu-tray-list {
+  display: flex;
+  flex-direction: column;
+  gap: $s-3;
+  padding: $s-3 $s-4 $s-4;
+
+  @include below($bp-sm) {
+    padding: $s-3;
+  }
+}
+
+.menu-tray {
   background: $bg-inset;
   border: 1px solid $border;
   border-radius: $r-md;
-  display: flex;
-  flex-direction: column;
-  grid-column: span 1;
-  min-width: 0;
   overflow: hidden;
 
-  &--open {
-    grid-column: 1 / -1;
-  }
-
-  &__toggle {
+  &__head {
+    align-items: center;
     background: transparent;
     border: none;
     color: inherit;
     cursor: pointer;
     display: flex;
-    flex-direction: column;
-    padding: 0;
+    gap: $s-3;
+    justify-content: space-between;
+    min-height: 48px;
+    padding: $s-3 $s-4;
     text-align: left;
     width: 100%;
+
+    &:hover {
+      background: rgba($accent, 0.04);
+    }
+
+    @include below($bp-sm) {
+      padding: $s-3;
+    }
   }
 
-  &__cover {
-    aspect-ratio: 1;
-    background: $bg-raised;
-    display: block;
-    object-fit: cover;
-    width: 100%;
-  }
-
-  &__cover-fallback {
-    align-items: center;
-    aspect-ratio: 1;
-    background: $bg-raised;
-    color: $text-faint;
-    display: flex;
-    font-size: $fs-xs;
-    justify-content: center;
-    width: 100%;
-  }
-
-  &__body {
-    display: flex;
-    flex-direction: column;
-    gap: $s-2;
-    padding: $s-3;
+  &__info {
+    min-width: 0;
   }
 
   &__title {
@@ -909,38 +955,40 @@ a {
   }
 
   &__meta {
-    color: $text-faint;
     display: flex;
     flex-wrap: wrap;
+    gap: $s-2;
+    margin-top: 4px;
+  }
+
+  &__stat {
+    color: $text-muted;
     font-size: $fs-xs;
-    gap: $s-2 $s-3;
-  }
 
-  &__count {
-    color: $text;
-    font-weight: 600;
-  }
-
-  &__kind {
-    color: $accent;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    &--muted {
+      color: $text-faint;
+    }
   }
 
   &__chev {
-    margin-left: auto;
+    @include mono;
+    color: $text-faint;
+    flex-shrink: 0;
   }
 
-  &__detail {
+  &__body {
     border-top: 1px solid $border;
     display: flex;
     flex-direction: column;
-    gap: $s-3;
-    padding: $s-3;
+    gap: $s-4;
+    padding: $s-3 $s-4 $s-4;
+
+    @include below($bp-sm) {
+      padding: $s-3;
+    }
   }
 
-  &__ig {
+  &__link {
     font-size: $fs-xs;
   }
 
@@ -957,25 +1005,65 @@ a {
   gap: $s-2;
 
   &__title {
-    font-size: $fs-sm;
+    color: $text-faint;
+    font-family: $font-ui;
+    font-size: $fs-xs;
     font-weight: 600;
+    letter-spacing: 0.06em;
     margin: 0;
+    text-transform: uppercase;
+  }
+
+  &__items {
+    background: $bg-raised;
+    border: 1px solid $border;
+    border-radius: $r-md;
+    overflow: hidden;
   }
 }
 
-.menu-table {
+.menu-item {
+  align-items: flex-start;
+  border-bottom: 1px solid $border;
+  display: flex;
+  gap: $s-3;
+  justify-content: space-between;
+  padding: $s-3;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &__main {
+    flex: 1;
+    min-width: 0;
+  }
+
   &__name {
     font-weight: 600;
+    overflow-wrap: anywhere;
   }
 
   &__desc {
     color: $text-faint;
     font-size: $fs-xs;
-    margin-top: 2px;
+    line-height: 1.4;
+    margin: 4px 0 0;
+    overflow-wrap: anywhere;
+  }
+
+  &__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: $s-1;
+    margin-top: $s-2;
   }
 
   &__price {
-    font-variant-numeric: tabular-nums;
+    @include mono;
+    font-size: $fs-sm;
+    font-weight: 600;
+    flex-shrink: 0;
     white-space: nowrap;
   }
 }
