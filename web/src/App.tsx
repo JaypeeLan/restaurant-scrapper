@@ -3,6 +3,7 @@ import { api, useFetch } from './api';
 import { AccountTable } from './components/AccountTable';
 import { Loading } from './components/Common';
 import { EventBoard } from './components/EventBoard';
+import { MenuBoard } from './components/MenuBoard';
 import { TabGlossary } from './components/PageGlossary';
 import { PostFeed } from './components/PostFeed';
 import { SummaryBar } from './components/SummaryBar';
@@ -18,6 +19,7 @@ const CapacityMonitor = lazy(() =>
 
 const TABS = [
   { id: 'events', label: 'Experiences' },
+  { id: 'menus', label: 'Menus' },
   { id: 'posts', label: 'Posts' },
   { id: 'accounts', label: 'Accounts' },
   { id: 'runs', label: 'Runs' },
@@ -99,6 +101,7 @@ export default function App() {
         <div className="stack">
           <SummaryBar />
           {tab === 'events' && <EventBoard />}
+          {tab === 'menus' && <MenuBoard />}
           {tab === 'posts' && <PostFeed />}
           {tab === 'accounts' && <AccountTable />}
           <Suspense fallback={<Loading label="Loading charts…" />}>

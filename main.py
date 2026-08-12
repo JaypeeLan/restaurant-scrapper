@@ -130,6 +130,35 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_backfill_ocr(args: argparse.Namespace) -> int:
+    """Persist flyer OCR titles onto existing posts (flyer-first naming)."""
+    from pipeline import ocr as ocr_mod
+
+    db = store.get_db()
+    store.ensure_indexes(db)
+    stats = ocr_mod.backfill_ocr(
+        db,
+        limit=args.limit,
+        handle=args.handle,
+        force=args.force,
+        dry_run=args.dry_run,
+    )
+    print(
+        f"ocr backfill scanned={stats['scanned']} updated={stats['updated']} "
+        f"ok={stats['ok']} empty={stats['empty']} error={stats['error']}"
+        + (" (dry-run)" if args.dry_run else "")
+    )
+    store.record_run(
+        db,
+        {
+            "kind": "ocr_backfill",
+            "dryRun": bool(args.dry_run),
+            **stats,
+        },
+    )
+    return 0 if stats.get("error", 0) == 0 or stats.get("ok", 0) > 0 else 1
+
+
 def cmd_search_handles(args: argparse.Namespace) -> int:
     """Logged-in topsearch → candidate handles (optionally seed ig_accounts)."""
     from ig import logged_in_search
@@ -359,6 +388,20 @@ def main() -> int:
     p_ing.add_argument("--tier", choices=tiers.TIER_ORDER)
     p_ing.add_argument("--dry-run", action="store_true")
     p_ing.set_defaults(func=cmd_ingest)
+
+    p_ocr = sub.add_parser(
+        "backfill-ocr",
+        help="OCR flyer images onto existing posts (stores ocrTitle for Experiences)",
+    )
+    p_ocr.add_argument("--limit", type=int, default=100)
+    p_ocr.add_argument("--handle", help="only this @handle")
+    p_ocr.add_argument(
+        "--force",
+        action="store_true",
+        help="re-OCR even when ocrAt already set",
+    )
+    p_ocr.add_argument("--dry-run", action="store_true")
+    p_ocr.set_defaults(func=cmd_backfill_ocr)
 
     p_sch = sub.add_parser("schedule", help="run continuously")
     p_sch.add_argument(

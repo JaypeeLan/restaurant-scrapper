@@ -103,6 +103,9 @@ def _cache_key(*, handle: str, post_id: str, caption: str, ocr_text: str) -> str
 
 def _flyer_ocr_text(post: dict[str, Any], *, allow_fetch: bool = True) -> str:
     """Best-effort raw OCR for the model (not the heuristic title picker)."""
+    stored = (post.get("ocrText") or "").strip()
+    if stored:
+        return stored
     try:
         from pipeline.ocr import flyer_text_for_post
     except ImportError:

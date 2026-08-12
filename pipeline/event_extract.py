@@ -198,15 +198,29 @@ _ITS_NAMED_AT = re.compile(
     r"(?:at|@)\b",
 )
 # "Ferrari Friday", "Shiro Sunday Brunch" — never schedule/time fragments.
+# Use [ \t] (not \s) so "…FOR THE SOUL\n\nFriday, 21 August" cannot become
+# "MUSIC FOR THE SOUL Friday".
 _NAMED_NIGHT = re.compile(
     r"\b("
     r"(?!Every|This|Next|Last|Each|Coming|Closed|Open|Hours|From|Until|"
     r"Your|Our|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|"
     r"AM|PM|To|Via|And|Or|The|For|With|Call|Book|Link)\b"
-    r"[A-Z][\w'’]{2,}(?:\s+[A-Z][\w'’]+){0,3}\s+"
+    r"[A-Z][\w'’]{2,}(?:[ \t]+[A-Z][\w'’]+){0,3}[ \t]+"
     r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
-    r"(?:\s+(?:Brunch|Night|Affairs?|Session|Party))?"
+    r"(?:[ \t]+(?:Brunch|Night|Affairs?|Session|Party))?"
     r")\b",
+)
+# Weekday that starts a date row ("Friday, 21 August | 9:30 PM"), not a brand.
+_WEEKDAY_DATE_TAIL = re.compile(
+    r"^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
+    r"(?:,|\s+\d{1,2}\b|\s*[|·•]|\s+(?:January|February|March|April|May|June|"
+    r"July|August|September|October|November|December|"
+    r"Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\b)",
+    re.I,
+)
+# "MI CASA ES TU CASA — HOUSE MUSIC FOR THE SOUL"
+_EMDASH_TITLE = re.compile(
+    r"^(.{4,48}?)\s*[—–-]\s*(.{4,48})$",
 )
 # "We say Teppanyaki." / "Teppanyaki Seatings:"
 _WE_SAY_OFFERING = re.compile(
@@ -218,7 +232,18 @@ _SEATINGS_LABEL = re.compile(
 )
 _OFFERING_TOKEN = re.compile(
     r"\b(teppanyaki|hibachi|unlimited\s+sushi|dim\s*sum|sunday\s+brunch(?:\s+affairs?)?|"
-    r"brunch\s+affairs?)\b",
+    r"brunch\s+affairs?|yum\s*cha)\b",
+    re.I,
+)
+# "meticulously curated YumCha experience" / CamelCase product + "experience"
+_BRANDED_EXPERIENCE = re.compile(
+    r"(?:curated|signature|exclusive|iconic)\s+"
+    r"([A-Z][\w'’]{2,}(?:\s+[A-Z][\w'’]+){0,2})\s+experiences?\b|"
+    r"\b([A-Z][a-z]+[A-Z][\w'’]*)\s+experiences?\b",
+)
+_GENERIC_BRAND_NAME = re.compile(
+    r"^(the|this|that|our|your|an|a|midday|daytime|weekday|weekend|dining|"
+    r"culinary|lagos|shiro|experience)$",
     re.I,
 )
 _SCHEDULE_NAME_NOISE = re.compile(
@@ -340,8 +365,17 @@ def _name_from_all_caps_line(caption: str) -> str | None:
         upper_ratio = sum(c.isupper() for c in letters) / len(letters)
         if upper_ratio < 0.85:
             continue
-        if not (8 <= len(cleaned) <= 60):
+        if not (8 <= len(cleaned) <= 72):
             continue
+        # Prefer the brand side of "MI CASA ES TU CASA — HOUSE MUSIC FOR THE SOUL".
+        em = _EMDASH_TITLE.match(cleaned)
+        if em:
+            left = _title_case_show(em.group(1).strip())
+            right = _title_case_show(em.group(2).strip())
+            if _is_usable_experience_name(left):
+                return left
+            if _is_usable_experience_name(right):
+                return right
         titled = _title_case_show(cleaned)
         if _is_bad_experience_name(titled):
             continue
@@ -401,13 +435,37 @@ def _name_from_named_night(caption: str) -> str | None:
         # Prefer multi-word branded nights (Ferrari Friday > Friday alone)
         if " " not in title:
             continue
+        # "…Soul\nFriday, 21 August" is a date line, not "Soul Friday".
+        after = caption[m.end() : m.end() + 40]
+        weekday = title.rsplit(" ", 1)[-1]
+        if _WEEKDAY_DATE_TAIL.match(f"{weekday}{after}"):
+            continue
         if best is None or len(title) > len(best):
             best = title[:160]
     return best
 
 
+def _name_from_branded_experience(caption: str) -> str | None:
+    """Prefer 'YumCha experience' over a generic dim-sum/sushi token."""
+    for m in _BRANDED_EXPERIENCE.finditer(caption):
+        raw = next((g for g in m.groups() if g), "")
+        title = _title_case_show(re.sub(r"\s+", " ", raw).strip())
+        # Preserve CamelCase brands like YumCha.
+        if raw and re.fullmatch(r"[A-Z][a-z]+[A-Z][\w'’]*", raw):
+            title = raw
+        if _GENERIC_BRAND_NAME.match(title):
+            continue
+        if _is_usable_experience_name(title):
+            return title[:160]
+    return None
+
+
 def _name_from_offering_label(caption: str) -> str | None:
     """Teppanyaki Seatings: / We say Teppanyaki / known offering tokens."""
+    branded = _name_from_branded_experience(caption)
+    if branded:
+        return branded
+
     m = _SEATINGS_LABEL.search(caption)
     if m:
         title = _title_case_show(re.sub(r"\s+", " ", m.group(1)).strip())
@@ -434,6 +492,11 @@ def _experience_name(caption: str) -> str:
 
     Prefer a real show/offering label. Never use long SEO openers as the name.
     """
+    # Hero ALL-CAPS flyer lines beat weak "Word Friday" date glues.
+    from_caps = _name_from_all_caps_line(caption)
+    if from_caps:
+        return from_caps
+
     from_night = _name_from_named_night(caption)
     if from_night:
         return from_night
@@ -441,10 +504,6 @@ def _experience_name(caption: str) -> str:
     from_offer = _name_from_offering_label(caption)
     if from_offer:
         return from_offer
-
-    from_caps = _name_from_all_caps_line(caption)
-    if from_caps:
-        return from_caps
 
     from_as = _name_from_as_clause(caption)
     if from_as:
@@ -764,7 +823,21 @@ def experience_from_post(
 
     flyer_text = (ocr_text or "").strip()
     card_title = None
-    if use_card_ocr and ocr_text is None:
+
+    # Flyer-first: prefer titles persisted at ingest (Mongo ocrTitle/ocrText).
+    stored_text = (post.get("ocrText") or "").strip()
+    stored_title = (post.get("ocrTitle") or "").strip() or None
+    if use_card_ocr and ocr_text is None and (stored_text or stored_title):
+        flyer_text = stored_text
+        card_title = stored_title
+        if flyer_text and not card_title:
+            try:
+                from pipeline.ocr import title_from_ocr
+
+                card_title = title_from_ocr(flyer_text, caption=caption)
+            except Exception:  # noqa: BLE001
+                card_title = None
+    elif use_card_ocr and ocr_text is None:
         try:
             from pipeline.ocr import flyer_text_for_post, title_from_ocr
 

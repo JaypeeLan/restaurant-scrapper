@@ -2,8 +2,10 @@
 OCR for Instagram post cards / flyers.
 
 Captions are mostly SEO. The on-image title is the real experience name.
-Results are cached under `.cache/ocr/` so the read API does not re-hit CDN
-every refresh.
+
+Ingest / backfill persist ``ocrText`` + ``ocrTitle`` on each post in Mongo so
+the read API never needs live CDN OCR. Disk cache under `.cache/ocr/` remains
+a warm path for local/dev.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,15 +23,18 @@ _CACHE_DIR = Path(__file__).resolve().parents[1] / ".cache" / "ocr"
 
 _OFFERING_CORE = re.compile(
     r"\b(teppanyaki|hibachi|brunch|brunei|buffet|sushi|dim\s*sum|happy\s*hour|"
-    r"unlimited\s+sushi|tasting\s+menu|dear\s+kaffy)\b",
+    r"unlimited\s+sushi|tasting\s+menu|dear\s+kaffy|yum\s*cha)\b",
     re.I,
 )
 _EVENTISH = re.compile(
     r"\b(brunch|brunei|affairs?|night|party|festival|session|seatings?|unlimited|"
     r"buffet|special|teppanyaki|hibachi|sushi|dim\s*sum|live\s+(dj|band|music|show)|"
-    r"guest\s+dj|dear\s+kaffy|sunday|friday|saturday)\b",
+    r"guest\s+dj|dear\s+kaffy|yum\s*cha|mi\s+casa|house\s+music|"
+    r"sunday|friday|saturday)\b",
     re.I,
 )
+_CAMEL_BRAND = re.compile(r"^[A-Z][a-z]+[A-Z][\w'’]*$")
+_EMDASH_TITLE = re.compile(r"^(.{4,48}?)\s*[—–-]\s*(.{4,48})$")
 _PRICEISH = re.compile(r"[₦$€£]\s*\d|\b\d{1,3}(?:,\d{3})+\b|\bper\s+person\b", re.I)
 _TIMEISH = re.compile(r"\d{1,2}[:.]\d{2}\s*(am|pm)|\b\d{1,2}\s*(am|pm)\b", re.I)
 _NOISE = re.compile(
@@ -301,10 +307,28 @@ def _ocr_candidate_ok(line: str) -> bool:
         return False
     if _PERSONISH.search(line) and not _OFFERING_CORE.search(line):
         return False
-    # Must look like an event/offering label, not a slogan.
-    if not (_EVENTISH.search(line) or _OFFERING_CORE.search(line)):
-        return False
-    return True
+    if _EVENTISH.search(line) or _OFFERING_CORE.search(line):
+        return True
+    # Flyer brand headers often have no brunch/night keyword (Mi Casa, YumCha).
+    words = line.split()
+    if _upper_ratio(line) > 0.7 and 2 <= len(words) <= 8:
+        return True
+    if _CAMEL_BRAND.match(line.strip()):
+        return True
+    if _EMDASH_TITLE.match(line) and _upper_ratio(line) > 0.55:
+        return True
+    return False
+
+
+def _prefer_emdash_brand(line: str) -> str:
+    """MI CASA ES TU CASA — HOUSE MUSIC FOR THE SOUL → Mi Casa Es Tu Casa."""
+    m = _EMDASH_TITLE.match(line.strip())
+    if not m:
+        return line
+    left = m.group(1).strip(" -–—\"'`")
+    if len(left) >= 4 and not _BARE_DAY.match(left):
+        return left
+    return line
 
 
 def title_from_ocr(text: str, *, caption: str | None = None) -> str | None:
@@ -320,7 +344,7 @@ def title_from_ocr(text: str, *, caption: str | None = None) -> str | None:
     raw_lines: list[str] = []
     for raw in text.splitlines():
         line = re.sub(r"\s+", " ", raw).strip(" |.-•*\"'`")
-        if len(line) < 3 or len(line) > 60:
+        if len(line) < 3 or len(line) > 80:
             continue
         if _NOISE.search(line) or _PRICEISH.search(line) or _TIMEISH.search(line):
             continue
@@ -346,14 +370,18 @@ def title_from_ocr(text: str, *, caption: str | None = None) -> str | None:
             score += 8
         if _OFFERING_CORE.search(line):
             score += 10
+        if _EMDASH_TITLE.match(line):
+            score += 7
+        if _CAMEL_BRAND.match(line.strip()):
+            score += 9
         words = line.split()
-        if 2 <= len(words) <= 4:
-            score += 5  # flyer titles: Sunday Brunch Affairs
+        if 2 <= len(words) <= 5:
+            score += 5  # flyer titles: Sunday Brunch Affairs / Mi Casa…
         elif len(words) == 1:
-            score += 4  # single brand words like Teppanyaki
-        elif len(words) > 6:
+            score += 4  # single brand words like Teppanyaki / YumCha
+        elif len(words) > 8:
             score -= 8  # menu blurb, not a title
-        if 8 <= len(line) <= 40:
+        if 8 <= len(line) <= 48:
             score += 3
         scored.append((score, line))
 
@@ -363,10 +391,14 @@ def title_from_ocr(text: str, *, caption: str | None = None) -> str | None:
     best_score, best = scored[0]
     if best_score < 6:
         return None
-    # Normalize casing: SUNDAY BRUNCH / mixed OCR → Sunday Brunch Affairs
-    if _upper_ratio(best) > 0.55 or any(w.isupper() and len(w) > 2 for w in best.split()):
+    best = _prefer_emdash_brand(best)
+    # Preserve CamelCase brands (YumCha); title-case the rest.
+    if _CAMEL_BRAND.match(best.strip()):
+        pass
+    elif _upper_ratio(best) > 0.55 or any(w.isupper() and len(w) > 2 for w in best.split()):
         best = best.title()
     best = _correct_title_with_caption(best, caption)
+    best = _prefer_emdash_brand(best)
     return _normalize_experience_name(best)
 
 
@@ -402,3 +434,160 @@ def flyer_text_for_post(
     except Exception as exc:  # noqa: BLE001
         log.debug("flyer OCR failed for %s: %s", post_id, exc)
         return ""
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _media_url(post: dict[str, Any]) -> str | None:
+    url = post.get("mediaUrl")
+    if url:
+        return str(url)
+    raw = (post.get("source") or {}).get("raw") or {}
+    return raw.get("display_uri") or raw.get("display_url")
+
+
+def run_ocr_fields(post: dict[str, Any], *, allow_fetch: bool = True) -> dict[str, Any]:
+    """
+    Compute Mongo OCR fields for one post (does not write).
+
+    Always returns ocrAt / ocrStatus so callers can persist failure states.
+    """
+    now = _now()
+    if not _media_url(post):
+        return {
+            "ocrText": "",
+            "ocrTitle": None,
+            "ocrStatus": "no_media",
+            "ocrAt": now,
+        }
+    try:
+        text = flyer_text_for_post(post, allow_fetch=allow_fetch) or ""
+    except Exception as exc:  # noqa: BLE001
+        log.warning("OCR failed for %s: %s", post.get("_id"), exc)
+        return {
+            "ocrText": "",
+            "ocrTitle": None,
+            "ocrStatus": "error",
+            "ocrError": str(exc)[:240],
+            "ocrAt": now,
+        }
+
+    caption = post.get("caption") or ""
+    if isinstance(caption, dict):
+        caption = caption.get("text") or ""
+    title = title_from_ocr(text, caption=caption) if text else None
+    return {
+        "ocrText": text,
+        "ocrTitle": title,
+        "ocrStatus": "ok" if text else "empty",
+        "ocrAt": now,
+    }
+
+
+def enrich_posts_with_ocr(
+    posts: list[dict[str, Any]],
+    *,
+    db: Any | None = None,
+    force: bool = False,
+) -> dict[str, int]:
+    """
+    Attach ocrText/ocrTitle onto post dicts (and optionally skip already-OCR'd).
+
+    When ``db`` is provided and ``force`` is false, posts that already have
+    ``ocrAt`` in Mongo are skipped (copy existing fields onto the in-memory doc
+    so upsert does not wipe them).
+    """
+    stats = {"ocrRan": 0, "ocrSkipped": 0, "ocrOk": 0, "ocrEmpty": 0, "ocrError": 0}
+    if not posts:
+        return stats
+
+    existing: dict[str, dict[str, Any]] = {}
+    if db is not None and not force:
+        ids = [p["_id"] for p in posts if p.get("_id")]
+        if ids:
+            from config import settings
+
+            for doc in db[settings.COL_POSTS].find(
+                {"_id": {"$in": ids}, "ocrAt": {"$exists": True}},
+                {"ocrText": 1, "ocrTitle": 1, "ocrStatus": 1, "ocrAt": 1, "ocrError": 1},
+            ):
+                existing[doc["_id"]] = doc
+
+    for post in posts:
+        pid = post.get("_id")
+        prior = existing.get(pid) if pid else None
+        if prior and not force:
+            for key in ("ocrText", "ocrTitle", "ocrStatus", "ocrAt", "ocrError"):
+                if key in prior and key not in post:
+                    post[key] = prior[key]
+            stats["ocrSkipped"] += 1
+            continue
+
+        fields = run_ocr_fields(post, allow_fetch=True)
+        post.update(fields)
+        stats["ocrRan"] += 1
+        status = fields.get("ocrStatus")
+        if status == "ok":
+            stats["ocrOk"] += 1
+        elif status == "error":
+            stats["ocrError"] += 1
+        else:
+            stats["ocrEmpty"] += 1
+    return stats
+
+
+def backfill_ocr(
+    db: Any,
+    *,
+    limit: int = 100,
+    handle: str | None = None,
+    force: bool = False,
+    dry_run: bool = False,
+) -> dict[str, int]:
+    """OCR posts missing flyer titles and $set fields on Mongo."""
+    from config import settings
+
+    query: dict[str, Any] = {
+        "mediaUrl": {"$exists": True, "$nin": [None, ""]},
+    }
+    if handle:
+        query["handle"] = handle.strip().lstrip("@").lower()
+    if not force:
+        query["$or"] = [
+            {"ocrAt": {"$exists": False}},
+            {"ocrStatus": {"$in": ["error", "empty", "no_media"]}},
+            {"ocrTitle": None},
+            {"ocrTitle": {"$exists": False}},
+        ]
+
+    cursor = (
+        db[settings.COL_POSTS]
+        .find(query)
+        .sort([("postedAt", -1)])
+        .limit(max(1, limit))
+    )
+    stats = {"scanned": 0, "updated": 0, "ok": 0, "empty": 0, "error": 0, "dryRun": 0}
+    for post in cursor:
+        stats["scanned"] += 1
+        fields = run_ocr_fields(post, allow_fetch=True)
+        status = fields.get("ocrStatus")
+        if status == "ok":
+            stats["ok"] += 1
+        elif status == "error":
+            stats["error"] += 1
+        else:
+            stats["empty"] += 1
+        if dry_run:
+            stats["dryRun"] += 1
+            log.info(
+                "[ocr-backfill] dry %s → title=%r status=%s",
+                post.get("_id"),
+                fields.get("ocrTitle"),
+                status,
+            )
+            continue
+        db[settings.COL_POSTS].update_one({"_id": post["_id"]}, {"$set": fields})
+        stats["updated"] += 1
+    return stats

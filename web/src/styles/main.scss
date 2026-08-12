@@ -399,6 +399,17 @@ a {
       flex-basis: 100%;
     }
   }
+
+  &__check {
+    align-items: center;
+    align-self: flex-end;
+    color: $text-muted;
+    display: inline-flex;
+    font-size: $fs-sm;
+    gap: $s-2;
+    min-height: 2.5rem;
+    padding-bottom: 2px;
+  }
 }
 
 .feed {
@@ -828,6 +839,72 @@ a {
   display: flex;
   flex-direction: column;
   gap: $s-4;
+}
+
+.menu-grid {
+  display: grid;
+  gap: $s-3;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  padding: $s-4;
+}
+
+.menu-card {
+  background: $bg-inset;
+  border: 1px solid $border;
+  border-radius: $r-md;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+
+  &__cover {
+    aspect-ratio: 1;
+    background: $bg-raised;
+    display: block;
+    object-fit: cover;
+    width: 100%;
+  }
+
+  &__cover-fallback {
+    align-items: center;
+    aspect-ratio: 1;
+    background: $bg-raised;
+    color: $text-faint;
+    display: flex;
+    font-size: $fs-xs;
+    justify-content: center;
+    width: 100%;
+  }
+
+  &__body {
+    display: flex;
+    flex-direction: column;
+    gap: $s-2;
+    padding: $s-3;
+  }
+
+  &__title {
+    font-family: $font-ui;
+    font-size: $fs-md;
+    font-weight: 600;
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  &__meta {
+    color: $text-faint;
+    display: flex;
+    flex-wrap: wrap;
+    font-size: $fs-xs;
+    gap: $s-2 $s-3;
+  }
+
+  &__kind {
+    color: $accent;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
 }
 
 .event-profile {

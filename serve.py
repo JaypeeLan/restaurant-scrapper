@@ -155,6 +155,14 @@ _EVENT_POST_PROJECTION = {
     "contentHash": 0,
 }
 
+# Instagram highlight tray titles that usually mean a menu board.
+_MENU_HIGHLIGHT_RE = re.compile(
+    r"menu|food|drink|beverage|wine|cocktail|kitchen|lunch|dinner|brunch|"
+    r"pastr(?:y|ies)|takeaway|take\s*away|how\s+to\s+order|specials?|"
+    r"\bbar\b|dessert|sushi|dim\s*sum",
+    re.I,
+)
+
 
 def _experience_drafts(
     db: Any,
@@ -167,8 +175,8 @@ def _experience_drafts(
     """
     Shared experience extraction for summary + /api/events.
 
-    Defaults match the dashboard: no live OCR/DeepSeek (cache + caption only)
-    so both endpoints always agree on counts.
+    Uses flyer titles stored on posts at ingest (``ocrTitle`` / ``ocrText``).
+    Live CDN OCR is off by default (``ocr_fetch=false``) so the dashboard stays fast.
     """
     query: dict[str, Any] = {}
     if handle:
@@ -263,6 +271,9 @@ def summary() -> dict[str, Any]:
         "postsLast24h": posts.count_documents({"firstSeenAt": {"$gte": day_ago}}),
         "postsLast7d": posts.count_documents({"firstSeenAt": {"$gte": week_ago}}),
         "highlights": db[settings.COL_HIGHLIGHTS].count_documents({}),
+        "menus": db[settings.COL_HIGHLIGHTS].count_documents(
+            {"title": {"$regex": _MENU_HIGHLIGHT_RE.pattern, "$options": "i"}}
+        ),
         "events": len(events),
         "generatedAt": _iso(_now()),
         **_schedule_next(),
@@ -476,6 +487,101 @@ def list_runs(
             else None
         ),
         **_schedule_next(),
+    }
+
+
+# ── highlights / menus ────────────────────────────────────────────────────────
+
+
+@app.get("/api/highlights")
+def list_highlights(
+    handle: str | None = Query(None, description="exact handle"),
+    q: str | None = Query(None, description="title substring"),
+    menus_only: bool = Query(
+        True,
+        description="Only trays whose title looks like a menu (food/drinks/etc.)",
+    ),
+    grouped: bool = Query(True, description="group by handle"),
+    limit: int = Query(100, ge=1, le=500),
+    skip: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """
+    Instagram highlight trays (cover + title). Menus live here for most venues.
+
+    Slide images are not stored yet — this surfaces which accounts publish a
+    Menu/Food/Drinks highlight and links into Instagram.
+    """
+    db = _db()
+    query: dict[str, Any] = {}
+    if handle:
+        query["handle"] = handle.strip().lstrip("@").lower()
+
+    title_clauses: list[dict[str, Any]] = []
+    if menus_only:
+        title_clauses.append(
+            {"title": {"$regex": _MENU_HIGHLIGHT_RE.pattern, "$options": "i"}}
+        )
+    if q:
+        title_clauses.append({"title": {"$regex": re.escape(q), "$options": "i"}})
+    if len(title_clauses) == 1:
+        query["title"] = title_clauses[0]["title"]
+    elif title_clauses:
+        query["$and"] = title_clauses
+
+    total = db[settings.COL_HIGHLIGHTS].count_documents(query)
+    cursor = (
+        db[settings.COL_HIGHLIGHTS]
+        .find(query)
+        .sort([("handle", 1), ("title", 1)])
+        .skip(skip)
+        .limit(limit)
+    )
+    items = [_clean(doc) for doc in cursor]
+    for item in items:
+        tray_id = item.get("trayId")
+        if tray_id:
+            item["permalink"] = f"https://www.instagram.com/stories/highlights/{tray_id}/"
+        item["kind"] = (
+            "menu"
+            if _MENU_HIGHLIGHT_RE.search(str(item.get("title") or ""))
+            else "highlight"
+        )
+
+    if not grouped:
+        return {
+            "grouped": False,
+            "total": total,
+            "limit": limit,
+            "skip": skip,
+            "menusOnly": menus_only,
+            "items": items,
+        }
+
+    by_handle: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        h = (item.get("handle") or "").lower() or "unknown"
+        by_handle.setdefault(h, []).append(item)
+
+    profiles: list[dict[str, Any]] = []
+    for h, trays in by_handle.items():
+        profiles.append(
+            {
+                "handle": h,
+                "menuCount": sum(1 for t in trays if t.get("kind") == "menu"),
+                "highlightCount": len(trays),
+                "highlights": trays,
+            }
+        )
+    profiles.sort(key=lambda p: (-p["menuCount"], -p["highlightCount"], p["handle"]))
+
+    return {
+        "grouped": True,
+        "total": total,
+        "profileTotal": len(profiles),
+        "limit": limit,
+        "skip": skip,
+        "menusOnly": menus_only,
+        "profiles": profiles,
     }
 
 

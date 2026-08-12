@@ -58,6 +58,8 @@ def ensure_indexes(db) -> None:
     db[settings.COL_POSTS].create_index([("shortcode", ASCENDING)])
     # Supports the not-yet-built event extraction pass.
     db[settings.COL_POSTS].create_index([("extractedAt", ASCENDING)], sparse=True)
+    db[settings.COL_POSTS].create_index([("ocrAt", ASCENDING)], sparse=True)
+    db[settings.COL_POSTS].create_index([("ocrStatus", ASCENDING)], sparse=True)
 
     db[settings.COL_HIGHLIGHTS].create_index([("handle", ASCENDING)])
     db[settings.COL_HANDLE_CANDIDATES].create_index([("handle", ASCENDING)], unique=True)
@@ -298,33 +300,41 @@ def record_failure(db, handle: str, reason: str, *, backoff_hours: int = 6) -> i
 
 def upsert_posts(db, docs: list[dict[str, Any]]) -> dict[str, int]:
     """
-    Bulk upsert. Returns {"new": n, "changed": n, "unchanged": n}.
+    Bulk upsert. Returns {"new": n, "changed": n, "unchanged": n, "ocrFilled": n}.
 
-    A post whose contentHash is unchanged is left completely alone — we don't
-    even bump a timestamp on it, so `extractedAt` stays valid and a later
-    extraction pass can cheaply find only what it hasn't processed.
+    A post whose contentHash is unchanged is left alone for caption fields —
+    except OCR fields may still be written when the doc carries fresh OCR and
+    Mongo does not yet have ``ocrAt``.
     """
     if not docs:
-        return {"new": 0, "changed": 0, "unchanged": 0}
+        return {"new": 0, "changed": 0, "unchanged": 0, "ocrFilled": 0}
 
     ids = [d["_id"] for d in docs]
     existing = {
-        d["_id"]: d.get("contentHash")
+        d["_id"]: d
         for d in db[settings.COL_POSTS].find(
-            {"_id": {"$in": ids}}, {"contentHash": 1}
+            {"_id": {"$in": ids}}, {"contentHash": 1, "ocrAt": 1}
         )
     }
 
     ops: list[UpdateOne] = []
-    stats = {"new": 0, "changed": 0, "unchanged": 0}
+    stats = {"new": 0, "changed": 0, "unchanged": 0, "ocrFilled": 0}
+    ocr_keys = ("ocrText", "ocrTitle", "ocrStatus", "ocrAt", "ocrError")
 
     for doc in docs:
-        prior = existing.get(doc["_id"], "__missing__")
-        if prior == doc["contentHash"]:
+        prior = existing.get(doc["_id"])
+        prior_hash = (prior or {}).get("contentHash", "__missing__")
+        if prior_hash == doc["contentHash"]:
+            if doc.get("ocrAt") and not (prior or {}).get("ocrAt"):
+                ocr_payload = {k: doc[k] for k in ocr_keys if k in doc}
+                if ocr_payload:
+                    ops.append(UpdateOne({"_id": doc["_id"]}, {"$set": ocr_payload}))
+                    stats["ocrFilled"] += 1
+                    continue
             stats["unchanged"] += 1
             continue
 
-        is_new = prior == "__missing__"
+        is_new = prior is None
         stats["new" if is_new else "changed"] += 1
 
         payload = dict(doc)

@@ -12,6 +12,7 @@ import type {
   AccountQuery,
   Capacity,
   EventsResponse,
+  HighlightsResponse,
   Paged,
   Post,
   PostQuery,
@@ -80,6 +81,17 @@ export const api = {
     } = {},
     signal?: AbortSignal,
   ) => request<EventsResponse>('/events', q as Record<string, unknown>, signal),
+  highlights: (
+    q: {
+      handle?: string;
+      q?: string;
+      menus_only?: boolean;
+      grouped?: boolean;
+      limit?: number;
+      skip?: number;
+    } = {},
+    signal?: AbortSignal,
+  ) => request<HighlightsResponse>('/highlights', q as Record<string, unknown>, signal),
   accounts: (q: AccountQuery = {}, signal?: AbortSignal) =>
     request<Paged<Account>>('/accounts', q as Record<string, unknown>, signal),
   runs: (q: { limit?: number; skip?: number; kind?: string } = {}, signal?: AbortSignal) =>

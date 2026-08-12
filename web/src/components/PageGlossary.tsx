@@ -66,6 +66,24 @@ export const TAB_GLOSSARIES: Record<string, GlossaryTerm[]> = {
         'Where the title came from — OCR of the flyer image, or an optional LLM refine. Default dashboard view uses captions + cached OCR only.',
     },
   ],
+  menus: [
+    ...SUMMARY_TERMS,
+    {
+      term: 'Menu highlight',
+      meaning:
+        'An Instagram Stories highlight tray whose title looks like a menu (Menu, Food, Drinks, Wine, etc.). Most venues keep the live menu here.',
+    },
+    {
+      term: 'Cover',
+      meaning:
+        'Highlight tray thumbnail from ingest. Slide images inside the tray are not scraped yet — Open on Instagram to browse them.',
+    },
+    {
+      term: 'Menus only',
+      meaning:
+        'Filters trays by title keywords. Turn off to see every highlight (Events, Contact, Reviews, …).',
+    },
+  ],
   posts: [
     ...SUMMARY_TERMS,
     {

@@ -64,6 +64,11 @@ export function SummaryBar() {
   return (
     <div className="stats">
       <Stat label="Experiences" value={fullNumber(data.events)} sub="deduped drafts" />
+      <Stat
+        label="Menus"
+        value={fullNumber(data.menus ?? 0)}
+        sub={`${fullNumber(data.highlights)} highlights`}
+      />
       <Stat label="Posts" value={fullNumber(data.posts)} sub={`${fullNumber(data.postsLast24h)} in 24h`} />
       <Stat
         label="Accounts"

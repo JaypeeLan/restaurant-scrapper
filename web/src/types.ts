@@ -140,6 +140,7 @@ export interface Summary {
   postsLast24h: number;
   postsLast7d: number;
   highlights: number;
+  menus?: number;
   events: number;
   generatedAt: string;
   now?: string;
@@ -279,4 +280,35 @@ export interface AccountQuery {
   limit?: number;
   skip?: number;
   sort?: 'nextFetchAt' | 'lastFetchedAt' | 'handle' | 'consecutiveFailures' | 'newestPostedAt';
+}
+
+export interface Highlight {
+  id: string;
+  handle: string;
+  trayId: string | null;
+  title: string | null;
+  coverUrl: string | null;
+  mediaCount: number | null;
+  permalink?: string;
+  kind?: 'menu' | 'highlight';
+  firstSeenAt?: string;
+  updatedAt?: string;
+}
+
+export interface HighlightProfile {
+  handle: string;
+  menuCount: number;
+  highlightCount: number;
+  highlights: Highlight[];
+}
+
+export interface HighlightsResponse {
+  grouped: boolean;
+  total: number;
+  profileTotal?: number;
+  limit: number;
+  skip: number;
+  menusOnly: boolean;
+  profiles?: HighlightProfile[];
+  items?: Highlight[];
 }

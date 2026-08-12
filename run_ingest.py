@@ -53,6 +53,7 @@ class Ingestor:
             "postsNew": 0,
             "postsChanged": 0,
             "postsUnchanged": 0,
+            "ocrFilled": 0,
         }
         # Per-handle outcomes for the Runs UI (stable order = due-queue order).
         self.account_results: list[dict[str, Any]] = []
@@ -121,14 +122,32 @@ class Ingestor:
         current_tier: str,
         source: str,
     ) -> int:
+        if posts and not self.dry_run:
+            from pipeline import ocr as ocr_mod
+
+            ocr_stats = ocr_mod.enrich_posts_with_ocr(posts, db=self.db, force=False)
+            if ocr_stats.get("ocrRan"):
+                log.info(
+                    "[%s] flyer OCR ran=%s ok=%s empty=%s err=%s skipped=%s",
+                    handle,
+                    ocr_stats.get("ocrRan"),
+                    ocr_stats.get("ocrOk"),
+                    ocr_stats.get("ocrEmpty"),
+                    ocr_stats.get("ocrError"),
+                    ocr_stats.get("ocrSkipped"),
+                )
+
         result = (
-            {"new": 0, "changed": 0, "unchanged": len(posts)}
+            {"new": 0, "changed": 0, "unchanged": len(posts), "ocrFilled": 0}
             if self.dry_run
             else store.upsert_posts(self.db, posts)
         )
         self.stats["postsNew"] += result["new"]
         self.stats["postsChanged"] += result["changed"]
         self.stats["postsUnchanged"] += result["unchanged"]
+        self.stats["ocrFilled"] = self.stats.get("ocrFilled", 0) + int(
+            result.get("ocrFilled") or 0
+        )
 
         newest_id, newest_at = store.newest_watermark(posts)
         tier = tiers.classify(newest_at)

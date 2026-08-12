@@ -521,6 +521,85 @@ The Details:
         event_extract._hashtag_to_title("ferrarifriday").lower() == "ferrari friday",
         event_extract._hashtag_to_title("ferrarifriday"),
     )
+
+    mi_casa_caption = (
+        "MI CASA ES TU CASA — HOUSE MUSIC FOR THE SOUL\n\n"
+        "Friday, 21 August | 9:30 PM – 3:00 AM\n"
+        "📍 Shiro Lagos, Landmark Centre, Oniru\n\n"
+        "A night of Tropical House, Afro House & soulful, vocal-driven sounds.\n"
+        "HEADLINER: DJ Tigran\n"
+        "#ShiroLagos #HouseMusic"
+    )
+    mi_casa_name = event_extract._experience_name(mi_casa_caption)
+    check(
+        "mi casa not glued to Friday date",
+        "friday" not in mi_casa_name.lower(),
+        mi_casa_name,
+    )
+    check(
+        "mi casa uses flyer brand title",
+        mi_casa_name.lower() == "mi casa es tu casa",
+        mi_casa_name,
+    )
+    check(
+        "named night does not cross newlines",
+        event_extract._name_from_named_night(mi_casa_caption) is None,
+        event_extract._name_from_named_night(mi_casa_caption),
+    )
+
+    yumcha_caption = (
+        "The weekday, redefined.\n\n"
+        "An afternoon designed to be savoured. Immerse yourself in an endless "
+        "flow of masterfully crafted dim sum, precision-rolled sushi, and "
+        "vibrant, chilled sangria. This is not just a midday pause; it is a "
+        "meticulously curated YumCha experience.\n\n"
+        "Join us Monday through Friday, from 12:30 PM to 3:30 PM "
+        "(₦40,000 per guest).\n"
+        "#ShiroLagos #LagosFineDining #ShiroExperience"
+    )
+    yumcha_name = event_extract._experience_name(yumcha_caption)
+    check(
+        "yumcha beats generic dim sum",
+        yumcha_name == "YumCha",
+        yumcha_name,
+    )
+
+    from pipeline import ocr as ocr_mod
+
+    mi_casa_ocr = "MI CASA ES TU CASA — HOUSE MUSIC FOR THE SOUL\nFriday, 21 August\n9:30 PM"
+    check(
+        "ocr picks mi casa brand",
+        (ocr_mod.title_from_ocr(mi_casa_ocr) or "").lower().startswith("mi casa"),
+        ocr_mod.title_from_ocr(mi_casa_ocr),
+    )
+    check(
+        "ocr picks yumcha from flyer",
+        ocr_mod.title_from_ocr("YUMCHA\nMonday - Friday\n12:30 PM") == "YumCha"
+        or (ocr_mod.title_from_ocr("YumCha experience\nWeekday lunch") or "").lower()
+        == "yumcha",
+        ocr_mod.title_from_ocr("YUMCHA\nMonday - Friday\n12:30 PM"),
+    )
+    stored = event_extract.experience_from_post(
+        {
+            "_id": "shirolagos:stored-ocr",
+            "handle": "shirolagos",
+            "caption": yumcha_caption,
+            "ocrText": "YUMCHA\nWeekday lunch experience",
+            "ocrTitle": "YumCha",
+            "permalink": "https://www.instagram.com/p/DYhIpdKK-ql/",
+        },
+        use_card_ocr=True,
+        use_llm=False,
+        ocr_allow_fetch=False,
+    )
+    check("stored ocrTitle wins", stored is not None)
+    if stored:
+        check(
+            "stored ocrTitle used as name",
+            ((stored.get("experience") or {}).get("name") or "") == "YumCha",
+            (stored.get("experience") or {}).get("name"),
+        )
+        check("nameSource is card", stored.get("nameSource") == "card", stored.get("nameSource"))
     ferrari_draft = event_extract.experience_from_post(
         {
             "_id": "redbar:ferrari",
