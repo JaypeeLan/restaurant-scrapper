@@ -185,7 +185,7 @@ function ProfileBlock({ profile }: { profile: HighlightProfile }) {
   const [open, setOpen] = useState(true);
   const itemTotal = profile.menuItemCount ?? 0;
   const trayLabel =
-    profile.menuCount === 1 ? '1 tray' : `${profile.menuCount} trays`;
+    profile.menuCount === 1 ? 'Menu' : `${profile.menuCount} menus`;
 
   return (
     <section className="menu-profile">

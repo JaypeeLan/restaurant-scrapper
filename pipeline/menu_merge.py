@@ -175,3 +175,50 @@ def merge_menu_trays(trays: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     merged.sort(key=lambda t: (-int(t.get("menuItemCount") or 0), (t.get("title") or "").lower()))
     return merged
+
+
+def collapse_profile_menus(trays: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    One menu card per restaurant. Hide trays with no extracted items.
+
+    When both Instagram and web sources exist, merge all items and prefer
+    external name/price on overlap.
+    """
+    with_items = [t for t in trays if int(t.get("menuItemCount") or 0) > 0]
+    if not with_items:
+        return []
+
+    web_trays = [t for t in with_items if t.get("sourceType") == "web"]
+    ig_trays = [t for t in with_items if t.get("sourceType") != "web"]
+    web_trays.sort(key=lambda t: -int(t.get("menuItemCount") or 0))
+    ig_trays.sort(key=lambda t: -int(t.get("menuItemCount") or 0))
+
+    primary = dict(web_trays[0] if web_trays else ig_trays[0])
+    web_items: list[dict[str, Any]] = []
+    ig_items: list[dict[str, Any]] = []
+    for t in web_trays:
+        web_items.extend(t.get("menuItems") or [])
+    for t in ig_trays:
+        ig_items.extend(t.get("menuItems") or [])
+
+    items = merge_menu_items(web_items, ig_items)
+    primary["menuItems"] = items
+    primary["menuItemCount"] = len(items)
+    primary["title"] = "Menu"
+    primary["kind"] = "menu"
+    if web_trays:
+        primary["sourceType"] = "web"
+
+    sources: list[dict[str, str]] = []
+    seen_hrefs: set[str] = set()
+    for t in web_trays + ig_trays:
+        for src in tray_source_links(t):
+            href = src["href"].rstrip("/").lower()
+            if href in seen_hrefs:
+                continue
+            seen_hrefs.add(href)
+            sources.append(src)
+    primary["sources"] = sources
+    primary["mergedFrom"] = [str(t.get("id") or "") for t in with_items if t.get("id")]
+
+    return [primary]

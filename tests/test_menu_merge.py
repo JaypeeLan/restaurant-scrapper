@@ -1,6 +1,6 @@
 """Tests for menu tray/item merging."""
 
-from pipeline.menu_merge import merge_menu_items, merge_menu_trays
+from pipeline.menu_merge import collapse_profile_menus, merge_menu_items
 
 
 def test_merge_items_external_price_wins() -> None:
@@ -20,7 +20,7 @@ def test_merge_items_keeps_ig_only() -> None:
     assert names == {"Plantain", "Jollof Rice"}
 
 
-def test_merge_trays_same_title() -> None:
+def test_collapse_profile_menus_one_card() -> None:
     trays = [
         {
             "id": "foo:123",
@@ -32,18 +32,46 @@ def test_merge_trays_same_title() -> None:
             "menuItemCount": 1,
         },
         {
-            "id": "foo:web:abc",
-            "title": "Food Menu",
-            "sourceType": "web",
-            "webSource": "linktree",
+            "id": "foo:456",
+            "title": "Drinks",
+            "sourceType": "highlight",
             "kind": "menu",
-            "menuUrl": "https://example.com/food.pdf",
-            "sourceUrl": "https://linktr.ee/foo",
+            "permalink": "https://instagram.com/h/456",
+            "menuItems": [{"itemName": "Beer", "price": 2000}],
+            "menuItemCount": 1,
+        },
+        {
+            "id": "foo:web:abc",
+            "title": "Menu PDF",
+            "sourceType": "web",
+            "webSource": "website",
+            "kind": "menu",
+            "menuUrl": "https://example.com/menu.pdf",
+            "sourceUrl": "https://example.com",
             "menuItems": [{"itemName": "Soup", "price": 4500}],
             "menuItemCount": 1,
         },
     ]
-    merged = merge_menu_trays(trays)
+    from pipeline.menu_merge import collapse_profile_menus
+
+    merged = collapse_profile_menus(trays)
     assert len(merged) == 1
+    assert merged[0]["menuItemCount"] == 2
     assert merged[0]["menuItems"][0]["price"] == 4500
-    assert len(merged[0]["sources"]) == 2
+
+
+def test_collapse_hides_empty() -> None:
+    from pipeline.menu_merge import collapse_profile_menus
+
+    trays = [
+        {
+            "id": "foo:web:empty",
+            "title": "Menu",
+            "sourceType": "web",
+            "menuUrl": "https://example.com/menu",
+            "menuItems": [],
+            "menuItemCount": 0,
+        },
+    ]
+    assert collapse_profile_menus(trays) == []
+

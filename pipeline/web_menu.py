@@ -93,6 +93,10 @@ def _clean_title(raw: str) -> str:
 
 
 def _is_usable_menu_url(url: str) -> bool:
+    return _accept_menu_candidate(url)
+
+
+def _accept_menu_candidate(url: str, anchor: str = "") -> bool:
     if not url.startswith("http"):
         return False
     if SKIP_URL_RE.search(url) or JUNK_URL_RE.search(url):
@@ -101,7 +105,11 @@ def _is_usable_menu_url(url: str) -> bool:
         return False
     if _is_pdf(url):
         return True
-    return bool(MENU_HINT_RE.search(_url_path(url)))
+    if MENU_HINT_RE.search(_url_path(url)):
+        return True
+    if anchor and MENU_HINT_RE.search(anchor):
+        return True
+    return False
 
 
 def _kind_for_url(url: str) -> str:
@@ -214,24 +222,44 @@ def _parse_linktree(html: str, profile_url: str) -> list[WebMenuSource]:
     return out
 
 
+_MENU_PROBE_PATHS = (
+    "/menu",
+    "/menus",
+    "/food-menu",
+    "/drinks-menu",
+    "/our-menu",
+    "/dining",
+    "/restaurant-menu",
+    "/food",
+    "/eat",
+    "/drinks",
+)
+
+
 def _discover_html_links(html: str, base_url: str) -> list[WebMenuSource]:
     out: list[WebMenuSource] = []
     seen: set[str] = set()
-    for href in re.findall(r"""href=["']([^"']+)["']""", html, re.I):
+    for match in re.finditer(
+        r"""<a[^>]+href=["']([^"']+)["'][^>]*>(.*?)</a>""",
+        html,
+        re.I | re.S,
+    ):
+        href = match.group(1)
         if href.startswith("#") or href.startswith("javascript:"):
             continue
+        anchor = _clean_title(re.sub(r"<[^>]+>", " ", match.group(2)))
         url = urljoin(base_url, href)
-        if not _is_usable_menu_url(url):
+        if not _accept_menu_candidate(url, anchor):
             continue
         key = url.rstrip("/").lower()
         if key in seen:
             continue
         seen.add(key)
-        title = _clean_title(href.rsplit("/", 1)[-1].replace("-", " ").replace("_", " "))
+        title = anchor or _clean_title(href.rsplit("/", 1)[-1].replace("-", " ").replace("_", " "))
         if not title:
             title = _clean_title(_url_path(url).rsplit("/", 1)[-1].replace("-", " "))
         if not title:
-            continue
+            title = "Menu"
         out.append(
             WebMenuSource(
                 title=title,
@@ -257,31 +285,58 @@ def discover_menu_sources(profile_url: str) -> list[WebMenuSource]:
     if not html:
         return []
     sources = _discover_html_links(html, profile_url)
+    seen = {s.url.rstrip("/").lower() for s in sources}
 
-    # Homepage often links /menu — also try common paths when nothing found.
-    if not sources:
-        base = profile_url.rstrip("/")
-        for suffix in ("/menu", "/menus", "/food-menu", "/drinks-menu", "/our-menu"):
-            probe = f"{base}{suffix}"
-            page = _fetch_text(probe)
-            if not page:
-                continue
-            found = _discover_html_links(page, probe)
-            if found:
-                sources.extend(found)
-            elif MENU_HINT_RE.search(probe):
-                sources.append(
-                    WebMenuSource(
-                        title="Menu",
-                        url=probe,
-                        kind="page",
-                        aggregator="website",
-                        profile_url=profile_url,
-                    )
+    # Menus often live on /menu or a PDF linked from a subpage — probe common paths.
+    base = profile_url.rstrip("/")
+    for suffix in _MENU_PROBE_PATHS:
+        probe = f"{base}{suffix}"
+        key = probe.rstrip("/").lower()
+        if key in seen:
+            continue
+        page = _fetch_text(probe)
+        if not page:
+            continue
+        found = _discover_html_links(page, probe)
+        if found:
+            for src in found:
+                src_key = src.url.rstrip("/").lower()
+                if src_key not in seen:
+                    seen.add(src_key)
+                    sources.append(src)
+        elif MENU_HINT_RE.search(_url_path(probe)) and len(page) > 400:
+            sources.append(
+                WebMenuSource(
+                    title="Menu",
+                    url=probe,
+                    kind="page",
+                    aggregator="website",
+                    profile_url=profile_url,
                 )
-            if sources:
-                break
+            )
+            seen.add(key)
     return sources
+
+
+def _source_score(src: WebMenuSource) -> int:
+    score = 0
+    if _is_pdf(src.url):
+        score += 100
+    path = _url_path(src.url).lower()
+    if "menu" in path:
+        score += 50
+    if MENU_HINT_RE.search(src.title):
+        score += 25
+    if src.aggregator == "linktree":
+        score += 10
+    return score
+
+
+def pick_best_source(sources: list[WebMenuSource]) -> WebMenuSource | None:
+    """Choose a single best menu URL (PDF / menu page preferred)."""
+    if not sources:
+        return None
+    return max(sources, key=_source_score)
 
 
 def discover_for_profile(profile: dict[str, Any] | None) -> list[WebMenuSource]:
@@ -295,7 +350,15 @@ def discover_for_profile(profile: dict[str, Any] | None) -> list[WebMenuSource]:
                 continue
             seen.add(key)
             merged.append(src)
-    return merged
+    best = pick_best_source(merged)
+    return [best] if best else []
+
+
+def clear_web_menus_for_handle(db: Any, handle: str) -> int:
+    result = db[settings.COL_HIGHLIGHTS].delete_many(
+        {"handle": handle.lower(), "sourceType": "web"},
+    )
+    return int(result.deleted_count)
 
 
 def pdf_to_text(data: bytes, *, max_pages: int = 12) -> str:
@@ -348,6 +411,8 @@ def url_to_menu_text(source: WebMenuSource) -> str:
 def is_junk_web_menu(doc: dict[str, Any]) -> bool:
     if doc.get("sourceType") != "web":
         return False
+    if int(doc.get("menuItemCount") or 0) <= 0:
+        return True
     title = str(doc.get("title") or "")
     menu_url = str(doc.get("menuUrl") or "")
     if JUNK_TITLE_RE.search(title) or JUNK_URL_RE.search(menu_url):
@@ -427,75 +492,87 @@ def backfill_web_menus(
         if not sources:
             continue
 
-        for src in sources:
-            if processed >= limit:
-                break
-            stats["sources"] += 1
-            doc_id = f"{handle_key}:web:{_slug(src.url)}"
-            existing = db[settings.COL_HIGHLIGHTS].find_one({"_id": doc_id}) or {}
-            if not force:
-                fresh = existing.get("menuExtractedAt")
-                has_items = int(existing.get("menuItemCount") or 0) > 0
-                if (
-                    has_items
-                    and isinstance(fresh, datetime)
-                    and fresh >= stale_before
-                    and existing.get("menuStatus") == "ok"
-                ):
-                    stats["skipped"] += 1
-                    continue
-
-            if dry_run:
-                stats["dryRun"] += 1
-                stats["updated"] += 1
+        src = sources[0]
+        if processed >= limit:
+            break
+        stats["sources"] += 1
+        doc_id = f"{handle_key}:web:{_slug(src.url)}"
+        existing = db[settings.COL_HIGHLIGHTS].find_one({"_id": doc_id}) or {}
+        if not force:
+            fresh = existing.get("menuExtractedAt")
+            has_items = int(existing.get("menuItemCount") or 0) > 0
+            if (
+                has_items
+                and isinstance(fresh, datetime)
+                and fresh >= stale_before
+                and existing.get("menuStatus") == "ok"
+            ):
+                stats["skipped"] += 1
                 processed += 1
-                log.info("[web-menu] dry @%s → %s (%s)", handle_key, src.title, src.url[:80])
                 continue
 
-            text = url_to_menu_text(src)
-            items: list[dict[str, Any]] = []
-            status = "empty"
-            if text.strip():
-                tray_key = _slug(src.url)
-                items = menu_extract.extract_menu_from_text(
-                    handle=handle_key,
-                    source_id=tray_key,
-                    source_title=src.title,
-                    text=text,
-                    source_kind="website",
-                )
-                status = "ok" if items else "empty"
-            else:
-                status = "error"
-
-            payload = {
-                "handle": handle_key,
-                "trayId": None,
-                "title": src.title,
-                "sourceType": "web",
-                "webSource": src.aggregator,
-                "sourceUrl": src.profile_url,
-                "menuUrl": src.url,
-                "menuItems": items,
-                "menuItemCount": len(items),
-                "menuStatus": status,
-                "menuExtractedAt": datetime.now(timezone.utc),
-            }
-            store.upsert_highlight_menu(db, doc_id, payload)
+        if dry_run:
+            stats["dryRun"] += 1
             stats["updated"] += 1
             processed += 1
-            if status == "ok":
-                stats["ok"] += 1
-            elif status == "error":
+            log.info("[web-menu] dry @%s → %s (%s)", handle_key, src.title, src.url[:80])
+            continue
+
+        text = url_to_menu_text(src)
+        items: list[dict[str, Any]] = []
+        status = "empty"
+        if text.strip():
+            tray_key = _slug(src.url)
+            items = menu_extract.extract_menu_from_text(
+                handle=handle_key,
+                source_id=tray_key,
+                source_title=src.title,
+                text=text,
+                source_kind="website",
+            )
+            status = "ok" if items else "empty"
+        else:
+            status = "error"
+
+        clear_web_menus_for_handle(db, handle_key)
+        if not items:
+            stats["updated"] += 1
+            processed += 1
+            if status == "error":
                 stats["error"] += 1
             else:
                 stats["empty"] += 1
             log.info(
-                "[web-menu] @%s %s → %d items (%s)",
+                "[web-menu] @%s no items from %s — not stored (%s)",
                 handle_key,
-                src.title,
-                len(items),
+                src.url[:80],
                 status,
             )
+            continue
+
+        payload = {
+            "handle": handle_key,
+            "trayId": None,
+            "title": "Menu",
+            "sourceType": "web",
+            "webSource": src.aggregator,
+            "sourceUrl": src.profile_url,
+            "menuUrl": src.url,
+            "menuItems": items,
+            "menuItemCount": len(items),
+            "menuStatus": status,
+            "menuExtractedAt": datetime.now(timezone.utc),
+        }
+        store.upsert_highlight_menu(db, doc_id, payload)
+        stats["updated"] += 1
+        processed += 1
+        stats["ok"] += 1
+        log.info(
+            "[web-menu] @%s %s → %d items (%s)",
+            handle_key,
+            src.title,
+            len(items),
+            status,
+        )
 
     return stats

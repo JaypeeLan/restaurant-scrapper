@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import settings
 from pipeline import event_extract, store, tiers
-from pipeline.menu_merge import merge_menu_trays
+from pipeline.menu_merge import collapse_profile_menus
 
 log = logging.getLogger("ig.serve")
 
@@ -742,11 +742,13 @@ def list_highlights(
 
     profiles: list[dict[str, Any]] = []
     for h, trays in by_handle.items():
-        merged_trays = merge_menu_trays(trays)
+        merged_trays = collapse_profile_menus(trays)
+        if not merged_trays:
+            continue
         profiles.append(
             {
                 "handle": h,
-                "menuCount": sum(1 for t in merged_trays if t.get("kind") == "menu"),
+                "menuCount": len(merged_trays),
                 "highlightCount": len(merged_trays),
                 "menuItemCount": sum(int(t.get("menuItemCount") or 0) for t in merged_trays),
                 "highlights": merged_trays,
