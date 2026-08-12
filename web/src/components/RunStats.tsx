@@ -329,6 +329,7 @@ export function RunStats() {
         signal,
       ),
     [limit, skip, kindFilter],
+    { key: 'runs', ttlMs: 30_000 },
   );
 
   const rows = useMemo(() => toRows(data?.items ?? []), [data]);

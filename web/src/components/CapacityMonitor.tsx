@@ -14,7 +14,11 @@ const TIER_COLORS: Record<Tier, string> = {
 const TIER_ORDER: Tier[] = ['hot', 'warm', 'cold', 'dormant'];
 
 export function CapacityMonitor() {
-  const { data, loading, error, reload } = useFetch((signal) => api.capacity(signal), []);
+  const { data, loading, error, reload } = useFetch(
+    (signal) => api.capacity(signal),
+    [],
+    { key: 'capacity', ttlMs: 120_000 },
+  );
 
   if (error) {
     return (

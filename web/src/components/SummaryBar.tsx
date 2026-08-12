@@ -54,7 +54,11 @@ function useCountdown(targetIso: string | null | undefined): number | null {
 }
 
 export function SummaryBar() {
-  const { data, error, reload } = useFetch((signal) => api.summary(signal), []);
+  const { data, error, reload } = useFetch(
+    (signal) => api.summary(signal),
+    [],
+    { key: 'summary', ttlMs: 60_000 },
+  );
   const ingestLeft = useCountdown(data?.nextIngestAt);
   const discoverLeft = useCountdown(data?.nextDiscoverAt);
 

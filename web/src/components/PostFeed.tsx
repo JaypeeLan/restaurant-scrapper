@@ -87,6 +87,7 @@ export function PostFeed() {
         signal,
       ),
     [debouncedHandle, debouncedSearch, since, until, sort, skip],
+    { key: 'posts', ttlMs: 30_000 },
   );
 
   return (

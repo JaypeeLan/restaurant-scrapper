@@ -141,6 +141,7 @@ export function EventBoard() {
         signal,
       ),
     [debouncedHandle, skip],
+    { key: 'events', ttlMs: 60_000 },
   );
 
   const profiles = data?.profiles ?? [];

@@ -12,9 +12,12 @@ Mirrors the FastAPI conventions in validds/scraper/serve.py.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import re
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -29,6 +32,59 @@ from pipeline import event_extract, store, tiers
 log = logging.getLogger("ig.serve")
 
 app = FastAPI(title="Instagram ingest API", version="1.0.0")
+
+# Short in-process TTL for expensive read endpoints. Ingest runs on a ~30m
+# cadence, so a minute or two of staleness is fine and avoids re-extracting
+# the same ~1000 posts on every tab switch / SummaryBar remount.
+_API_CACHE_TTL_S = float(os.getenv("API_CACHE_TTL_S", "60"))
+_HIGHLIGHTS_CACHE_TTL_S = float(os.getenv("API_HIGHLIGHTS_CACHE_TTL_S", "180"))
+
+
+class _TtlCache:
+    """Thread-safe deepcopy TTL map. Values are copied on get/set so callers
+    can mutate responses without poisoning the store."""
+
+    def __init__(self, ttl_s: float, *, max_entries: int = 128) -> None:
+        self.ttl_s = max(0.0, ttl_s)
+        self.max_entries = max_entries
+        self._lock = threading.Lock()
+        self._store: dict[Any, tuple[float, Any]] = {}
+
+    def get(self, key: Any) -> Any | None:
+        if self.ttl_s <= 0:
+            return None
+        now = time.monotonic()
+        with self._lock:
+            hit = self._store.get(key)
+            if hit is None:
+                return None
+            expires, value = hit
+            if now >= expires:
+                del self._store[key]
+                return None
+            return copy.deepcopy(value)
+
+    def set(self, key: Any, value: Any) -> None:
+        if self.ttl_s <= 0:
+            return
+        expires = time.monotonic() + self.ttl_s
+        payload = copy.deepcopy(value)
+        with self._lock:
+            if len(self._store) >= self.max_entries:
+                # Drop expired first, then oldest insert order.
+                now = time.monotonic()
+                expired = [k for k, (exp, _) in self._store.items() if now >= exp]
+                for k in expired:
+                    del self._store[k]
+                while len(self._store) >= self.max_entries:
+                    self._store.pop(next(iter(self._store)), None)
+            self._store[key] = (expires, payload)
+
+
+_drafts_cache = _TtlCache(_API_CACHE_TTL_S)
+_summary_cache = _TtlCache(_API_CACHE_TTL_S, max_entries=4)
+_capacity_cache = _TtlCache(_API_CACHE_TTL_S, max_entries=4)
+_highlights_cache = _TtlCache(_HIGHLIGHTS_CACHE_TTL_S)
 
 _ALLOWED_ORIGINS = [
     o.strip()
@@ -205,9 +261,15 @@ def _experience_drafts(
     if use_llm is None:
         use_llm = deepseek_extract.enabled()
 
+    handle_key = handle.strip().lstrip("@").lower() if handle else ""
+    cache_key = (handle_key, int(min_score), bool(use_llm), bool(ocr_fetch))
+    cached = _drafts_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     query: dict[str, Any] = {}
-    if handle:
-        query["handle"] = handle.strip().lstrip("@").lower()
+    if handle_key:
+        query["handle"] = handle_key
 
     posts = list(
         db[settings.COL_POSTS]
@@ -254,6 +316,7 @@ def _experience_drafts(
         except Exception as exc:  # noqa: BLE001
             log.warning("llm persist failed: %s", exc)
 
+    _drafts_cache.set(cache_key, (events, profiles))
     return events, profiles
 
 
@@ -300,6 +363,13 @@ def health() -> dict[str, Any]:
 @app.get("/api/summary")
 def summary() -> dict[str, Any]:
     """Headline counters for the dashboard strip."""
+    cached = _summary_cache.get("summary")
+    if cached is not None:
+        # Refresh schedule countdowns even on a cache hit — absolute next*At
+        # stays valid; the seconds-left fields should track wall clock.
+        cached.update(_schedule_next())
+        return cached
+
     db = _db()
     accounts = db[settings.COL_ACCOUNTS]
     posts = db[settings.COL_POSTS]
@@ -309,7 +379,7 @@ def summary() -> dict[str, Any]:
 
     events, _profiles = _experience_drafts(db, use_llm=False)
 
-    return {
+    payload = {
         "accounts": accounts.count_documents({}),
         "accountsDue": accounts.count_documents({"nextFetchAt": {"$lte": _now()}}),
         "accountsFailing": accounts.count_documents({"consecutiveFailures": {"$gte": 3}}),
@@ -338,6 +408,8 @@ def summary() -> dict[str, Any]:
         "generatedAt": _iso(_now()),
         **_schedule_next(),
     }
+    _summary_cache.set("summary", payload)
+    return payload
 
 
 # ── posts ─────────────────────────────────────────────────────────────────────
@@ -576,10 +648,24 @@ def list_highlights(
     Instagram highlight trays. Menu trays may include extracted ``menuItems``
     shaped like product MenuType drafts (itemName, price, category, type, section).
     """
+    handle_key = handle.strip().lstrip("@").lower() if handle else ""
+    cache_key = (
+        handle_key,
+        q or "",
+        bool(menus_only),
+        bool(grouped),
+        bool(include_slides),
+        int(limit),
+        int(skip),
+    )
+    cached = _highlights_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     db = _db()
     query: dict[str, Any] = {}
-    if handle:
-        query["handle"] = handle.strip().lstrip("@").lower()
+    if handle_key:
+        query["handle"] = handle_key
 
     title_clauses: list[dict[str, Any]] = []
     if menus_only:
@@ -622,7 +708,7 @@ def list_highlights(
             item["menuItemCount"] = int(item.get("menuItemCount") or len(items_list))
 
     if not grouped:
-        return {
+        payload = {
             "grouped": False,
             "total": total,
             "limit": limit,
@@ -630,6 +716,8 @@ def list_highlights(
             "menusOnly": menus_only,
             "items": items,
         }
+        _highlights_cache.set(cache_key, payload)
+        return payload
 
     by_handle: dict[str, list[dict[str, Any]]] = {}
     for item in items:
@@ -651,7 +739,7 @@ def list_highlights(
         key=lambda p: (-p["menuItemCount"], -p["menuCount"], -p["highlightCount"], p["handle"])
     )
 
-    return {
+    payload = {
         "grouped": True,
         "total": total,
         "profileTotal": len(profiles),
@@ -660,6 +748,8 @@ def list_highlights(
         "menusOnly": menus_only,
         "profiles": profiles,
     }
+    _highlights_cache.set(cache_key, payload)
+    return payload
 
 
 # ── events (heuristic + optional DeepSeek refine) ─────────────────────────────
@@ -766,6 +856,10 @@ def _playwright_capacity() -> dict[str, Any]:
 @app.get("/api/capacity")
 def capacity() -> dict[str, Any]:
     """Live version of `python main.py capacity`."""
+    cached = _capacity_cache.get("capacity")
+    if cached is not None:
+        return cached
+
     db = _db()
     counts = {
         t: db[settings.COL_ACCOUNTS].count_documents({"tier": t}) for t in tiers.TIER_ORDER
@@ -780,7 +874,7 @@ def capacity() -> dict[str, Any]:
         daily_cap = pw["dailyCapacity"]
         demand = plan["dailyDemand"]
         util = (demand / daily_cap) if daily_cap else None
-        return {
+        payload = {
             **plan,
             "dailyCapacity": daily_cap,
             "utilization": round(util, 3) if util is not None else None,
@@ -793,17 +887,20 @@ def capacity() -> dict[str, Any]:
             "primarySource": "playwright",
             "playwright": pw,
         }
+    else:
+        payload = {
+            **plan,
+            "tierCounts": counts,
+            "callsPerHour": settings.IG_GRAPH_CALLS_PER_HOUR,
+            "tierIntervalsHours": settings.TIER_INTERVALS_HOURS,
+            "graphConfigured": graph_ok,
+            "fallbackEnabled": settings.IG_FALLBACK_ENABLED,
+            "primarySource": "graph" if graph_ok else "none",
+            "playwright": pw,
+        }
 
-    return {
-        **plan,
-        "tierCounts": counts,
-        "callsPerHour": settings.IG_GRAPH_CALLS_PER_HOUR,
-        "tierIntervalsHours": settings.TIER_INTERVALS_HOURS,
-        "graphConfigured": graph_ok,
-        "fallbackEnabled": settings.IG_FALLBACK_ENABLED,
-        "primarySource": "graph" if graph_ok else "none",
-        "playwright": pw,
-    }
+    _capacity_cache.set("capacity", payload)
+    return payload
 
 
 # ── static frontend (after `npm run build` in web/) ───────────────────────────

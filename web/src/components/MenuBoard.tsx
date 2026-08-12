@@ -183,6 +183,7 @@ export function MenuBoard() {
         signal,
       ),
     [debouncedHandle, debouncedSearch, menusOnly],
+    { key: 'highlights', ttlMs: 180_000 },
   );
 
   const profiles = data?.profiles ?? [];

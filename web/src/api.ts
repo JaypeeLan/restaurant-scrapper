@@ -2,8 +2,8 @@
  * Typed API client + a small fetch hook.
  *
  * Deliberately no data-fetching library. There are five endpoints, all reads,
- * and the interesting behaviour (abort on unmount, abort on param change) is
- * about twenty lines. Adding React Query here would be more config than code.
+ * and the interesting behaviour (abort on unmount, abort on param change,
+ * short TTL keep-alive across tab remounts) is still cheaper than React Query.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -107,21 +107,58 @@ export interface FetchState<T> {
   reload: () => void;
 }
 
+export interface FetchCacheOptions {
+  /** Stable id for this query family (e.g. "capacity", "events"). */
+  key: string;
+  /** How long a successful response stays warm across remounts. Default 60s. */
+  ttlMs?: number;
+}
+
+const DEFAULT_CACHE_TTL_MS = 60_000;
+
+type CacheEntry = { expires: number; data: unknown };
+const _responseCache = new Map<string, CacheEntry>();
+
+function cacheLookup<T>(id: string | null): T | null {
+  if (!id) return null;
+  const hit = _responseCache.get(id);
+  if (!hit) return null;
+  if (hit.expires <= Date.now()) {
+    _responseCache.delete(id);
+    return null;
+  }
+  return hit.data as T;
+}
+
+function cacheStore(id: string | null, data: unknown, ttlMs: number): void {
+  if (!id || ttlMs <= 0) return;
+  _responseCache.set(id, { expires: Date.now() + ttlMs, data });
+}
+
 /**
  * Runs `fn` whenever `deps` change, aborting any in-flight request first.
  *
  * The abort matters here: typing in the caption search fires a request per
  * keystroke, and without it a slow early response can land after a fast later
  * one and overwrite the correct results.
+ *
+ * Pass `cache` to keep the last good response warm across tab remounts so
+ * switching Experiences → Menus → Capacity does not flash a loading state.
+ * `reload()` always bypasses the cache.
  */
 export function useFetch<T>(
   fn: (signal: AbortSignal) => Promise<T>,
   deps: readonly unknown[],
+  cache?: FetchCacheOptions,
 ): FetchState<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cacheId = cache ? `${cache.key}:${JSON.stringify(deps)}` : null;
+  const ttlMs = cache?.ttlMs ?? DEFAULT_CACHE_TTL_MS;
+
+  const [data, setData] = useState<T | null>(() => cacheLookup(cacheId));
+  const [loading, setLoading] = useState(() => cacheLookup(cacheId) == null);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  const bypassOnceRef = useRef(false);
 
   const fnRef = useRef(fn);
   fnRef.current = fn;
@@ -129,6 +166,21 @@ export function useFetch<T>(
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
+    const bypass = bypassOnceRef.current;
+    bypassOnceRef.current = false;
+
+    if (!bypass) {
+      const hit = cacheLookup<T>(cacheId);
+      if (hit != null) {
+        setData(hit);
+        setError(null);
+        setLoading(false);
+        return () => {
+          active = false;
+          controller.abort();
+        };
+      }
+    }
 
     setLoading(true);
     setError(null);
@@ -139,6 +191,7 @@ export function useFetch<T>(
         if (!active) return;
         setData(result);
         setError(null);
+        cacheStore(cacheId, result, ttlMs);
       })
       .catch((err: unknown) => {
         if (!active) return;
@@ -154,9 +207,13 @@ export function useFetch<T>(
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, nonce]);
+  }, [...deps, nonce, cacheId, ttlMs]);
 
-  const reload = useCallback(() => setNonce((n) => n + 1), []);
+  const reload = useCallback(() => {
+    if (cacheId) _responseCache.delete(cacheId);
+    bypassOnceRef.current = true;
+    setNonce((n) => n + 1);
+  }, [cacheId]);
 
   return { data, loading, error, reload };
 }

@@ -34,6 +34,7 @@ export function AccountTable() {
         signal,
       ),
     [tier, failing, debouncedSearch, sort, skip],
+    { key: 'accounts', ttlMs: 30_000 },
   );
 
   return (
