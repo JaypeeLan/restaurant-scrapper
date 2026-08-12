@@ -21,7 +21,7 @@ events, menus, or dress codes yet.
 ```bash
 cp .env.example .env
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-ingest.txt
 playwright install chromium
 
 python main.py preflight

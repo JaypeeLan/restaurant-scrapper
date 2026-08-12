@@ -8,10 +8,6 @@ apscheduler>=3.10.4
 fastapi>=0.110.0
 uvicorn>=0.27.0
 
-# Fallback path only — skip if IG_FALLBACK_ENABLED=false
-playwright>=1.40.0
-playwright-stealth>=1.0.6
-
-# Flyer/card title OCR (needs system tesseract binary)
+# Flyer/card title OCR (optional at runtime; caption path works without tesseract)
 pillow>=10.0.0
 pytesseract>=0.3.10

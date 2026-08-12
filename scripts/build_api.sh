@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Build the API for Render's native Python runtime.
 #
-# The dashboard lives on Vercel now — do not install Node / build Vite here
-# unless BUILD_WEB=1 (keeps free-tier deploys fast and less failure-prone).
+# Intentionally lean: no Playwright (that's for cron ingest). Dashboard UI is
+# on Vercel, so we also skip the Vite build unless BUILD_WEB=1.
 set -euo pipefail
 
+export PIP_NO_CACHE_DIR=1
 pip install -r requirements.txt
 
 if [[ "${BUILD_WEB:-0}" == "1" ]]; then
@@ -25,3 +26,6 @@ if [[ "${BUILD_WEB:-0}" == "1" ]]; then
 else
   echo "skipping web SPA build (hosted on Vercel); set BUILD_WEB=1 to enable"
 fi
+
+# Fail the build early if the app cannot import (catches syntax/regex issues).
+python -c "import serve; print('serve import ok:', serve.app.title)"

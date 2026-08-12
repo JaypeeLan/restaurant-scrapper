@@ -1,0 +1,5 @@
+# Ingest / discover / cron workers — includes Playwright browsers stack.
+-r requirements.txt
+
+playwright>=1.40.0
+playwright-stealth>=1.0.6

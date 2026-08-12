@@ -61,7 +61,7 @@ You query as your own account about other public business/creator accounts.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-ingest.txt
 playwright install chromium   # required for Playwright-only ingest
 ```
 

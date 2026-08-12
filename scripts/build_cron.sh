@@ -13,5 +13,6 @@ cd "$ROOT"
 export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$ROOT/ms-playwright}"
 mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"
 
-pip install -r requirements.txt
+export PIP_NO_CACHE_DIR=1
+pip install -r requirements-ingest.txt
 playwright install chromium
