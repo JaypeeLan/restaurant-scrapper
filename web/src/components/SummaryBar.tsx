@@ -67,7 +67,11 @@ export function SummaryBar() {
       <Stat
         label="Menus"
         value={fullNumber(data.menus ?? 0)}
-        sub={`${fullNumber(data.highlights)} highlights`}
+        sub={
+          data.menuItems
+            ? `${fullNumber(data.menuItems)} items · ${fullNumber(data.highlights)} trays`
+            : `${fullNumber(data.highlights)} highlights`
+        }
       />
       <Stat label="Posts" value={fullNumber(data.posts)} sub={`${fullNumber(data.postsLast24h)} in 24h`} />
       <Stat

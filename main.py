@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import logging
 import sys
+from datetime import datetime, timezone
 
 from config import settings
 from pipeline import store, tiers
@@ -159,6 +160,126 @@ def cmd_backfill_ocr(args: argparse.Namespace) -> int:
     return 0 if stats.get("error", 0) == 0 or stats.get("ok", 0) > 0 else 1
 
 
+def cmd_backfill_menus(args: argparse.Namespace) -> int:
+    """Fetch highlight slides (logged-in) → OCR → MenuType drafts."""
+    from datetime import timedelta
+
+    from ig import logged_in_search
+    from pipeline import menu_extract
+
+    from_stored = bool(getattr(args, "from_stored", False))
+    if not from_stored and not logged_in_search.session_configured():
+        print("  ✗ cookies required (cookies.txt / IG_COOKIES)")
+        return 1
+
+    db = store.get_db()
+    store.ensure_indexes(db)
+
+    every_days = max(1, int(getattr(args, "every_days", None) or settings.MENU_EVERY_DAYS))
+    stale_before = datetime.now(timezone.utc) - timedelta(days=every_days)
+
+    query: dict = {
+        "title": {
+            "$regex": (
+                r"menu|food|drink|beverage|wine|cocktail|kitchen|brunch|"
+                r"pastr(?:y|ies)|takeaway|bar"
+            ),
+            "$options": "i",
+        }
+    }
+    if args.handle:
+        query["handle"] = args.handle.strip().lstrip("@").lower()
+    if args.tray:
+        query["trayId"] = str(args.tray).strip()
+    if from_stored:
+        query["slides.0.ocrText"] = {"$exists": True}
+    elif not args.force:
+        # Missing, failed, or older than weekly cadence.
+        query["$or"] = [
+            {"menuExtractedAt": {"$exists": False}},
+            {"menuStatus": {"$in": ["empty", "error"]}},
+            {"menuItemCount": {"$lte": 0}},
+            {"menuExtractedAt": {"$lt": stale_before}},
+        ]
+
+    limit = max(1, int(args.limit if args.limit is not None else settings.MENU_BACKFILL_LIMIT))
+    trays = list(
+        db[settings.COL_HIGHLIGHTS]
+        .find(query)
+        .sort([("menuExtractedAt", 1), ("handle", 1), ("title", 1)])
+        .limit(limit)
+    )
+    if not trays:
+        print("no menu highlights to process")
+        return 0
+
+    print(
+        f"menus backfill candidates={len(trays)} "
+        f"(stale>{every_days}d or missing; limit={limit})"
+    )
+
+    ok = 0
+    empty = 0
+    errors = 0
+    for tray in trays:
+        handle = tray.get("handle") or ""
+        tray_id = str(tray.get("trayId") or "")
+        title = tray.get("title") or ""
+        try:
+            result = menu_extract.extract_highlight_menu(
+                db,
+                handle=handle,
+                tray_id=tray_id,
+                max_slides=args.max_slides,
+                force=True,  # selected as due; always refresh this tray
+                from_stored=from_stored,
+                max_age_days=every_days,
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors += 1
+            print(f"  ✗ @{handle} {title!r}: {exc}")
+            continue
+        n = int(result.get("itemCount") or 0)
+        if result.get("skipped"):
+            # Should be rare when force=True.
+            print(
+                f"  skip @{handle} {title!r} slides={result.get('slideCount')} "
+                f"items={n}"
+            )
+            continue
+        if n:
+            ok += 1
+        else:
+            empty += 1
+        print(
+            f"  ok @{handle} {title!r} slides={result.get('slideCount')} "
+            f"items={n}"
+        )
+        if args.show and result.get("items"):
+            for item in result["items"][:12]:
+                price = item.get("price") or 0
+                print(
+                    f"      - {item.get('itemName')}  "
+                    f"{price if price else '—'}  [{item.get('type')}/{item.get('category')}] "
+                    f"§{item.get('section')}"
+                )
+
+    print(f"menus backfill trays={len(trays)} ok={ok} empty={empty} error={errors}")
+    store.record_run(
+        db,
+        {
+            "kind": "menu_backfill",
+            "trays": len(trays),
+            "ok": ok,
+            "empty": empty,
+            "error": errors,
+            "fromStored": from_stored,
+            "everyDays": every_days,
+        },
+    )
+    return 0 if errors == 0 else 1
+
+
 def cmd_search_handles(args: argparse.Namespace) -> int:
     """Logged-in topsearch → candidate handles (optionally seed ig_accounts)."""
     from ig import logged_in_search
@@ -301,6 +422,24 @@ def cmd_schedule(args: argparse.Namespace) -> int:
         except Exception as exc:  # noqa: BLE001
             log.error("post-discover ingest failed: %s", exc)
 
+    def menu_job() -> None:
+        try:
+            rc = cmd_backfill_menus(
+                argparse.Namespace(
+                    limit=args.menu_limit,
+                    handle=None,
+                    tray=None,
+                    max_slides=24,
+                    force=False,
+                    from_stored=False,
+                    show=False,
+                    every_days=args.menu_every_days,
+                )
+            )
+            log.info("menu job done rc=%s", rc)
+        except Exception as exc:  # noqa: BLE001
+            log.error("menu job failed: %s", exc)
+
     scheduler.add_job(
         ingest_job, "interval", minutes=args.every, max_instances=1, coalesce=True
     )
@@ -313,12 +452,23 @@ def cmd_schedule(args: argparse.Namespace) -> int:
             coalesce=True,
         )
         scheduler.add_job(discover_job, "date")
+    if args.menu_every_days > 0:
+        scheduler.add_job(
+            menu_job,
+            "interval",
+            days=args.menu_every_days,
+            max_instances=1,
+            coalesce=True,
+        )
 
     log.info(
-        "scheduler started — ingest every %d min (limit %d); discover every %s h (+ ingest after)",
+        "scheduler started — ingest every %d min (limit %d); discover every %s h "
+        "(+ ingest after); menus every %s d (limit %d)",
         args.every,
         args.limit,
         args.discover_every if args.discover_every > 0 else "off",
+        args.menu_every_days if args.menu_every_days > 0 else "off",
+        args.menu_limit,
     )
     scheduler.start()
     return 0
@@ -403,6 +553,38 @@ def main() -> int:
     p_ocr.add_argument("--dry-run", action="store_true")
     p_ocr.set_defaults(func=cmd_backfill_ocr)
 
+    p_menu = sub.add_parser(
+        "backfill-menus",
+        help="logged-in highlight slides → OCR → MenuType drafts",
+    )
+    p_menu.add_argument(
+        "--limit",
+        type=int,
+        default=settings.MENU_BACKFILL_LIMIT,
+        help="max trays this run",
+    )
+    p_menu.add_argument("--handle", help="only this @handle")
+    p_menu.add_argument("--tray", help="only this highlight tray id")
+    p_menu.add_argument("--max-slides", type=int, default=24)
+    p_menu.add_argument(
+        "--every-days",
+        type=int,
+        default=settings.MENU_EVERY_DAYS,
+        help="re-extract trays older than this many days (default weekly)",
+    )
+    p_menu.add_argument(
+        "--force",
+        action="store_true",
+        help="re-extract even fresh trays (ignore weekly age gate)",
+    )
+    p_menu.add_argument(
+        "--from-stored",
+        action="store_true",
+        help="reuse stored slide OCR; only re-run DeepSeek (no IG refetch)",
+    )
+    p_menu.add_argument("--show", action="store_true", help="print sample items")
+    p_menu.set_defaults(func=cmd_backfill_menus)
+
     p_sch = sub.add_parser("schedule", help="run continuously")
     p_sch.add_argument(
         "--every",
@@ -420,6 +602,18 @@ def main() -> int:
     p_sch.add_argument("--discover-city", default=settings.DISCOVER_CITY)
     p_sch.add_argument("--place-limit", type=int, default=settings.DISCOVER_PLACE_LIMIT)
     p_sch.add_argument("--resolve-limit", type=int, default=settings.DISCOVER_RESOLVE_LIMIT)
+    p_sch.add_argument(
+        "--menu-every-days",
+        type=int,
+        default=settings.MENU_EVERY_DAYS,
+        help="days between menu highlight backfill (0=off)",
+    )
+    p_sch.add_argument(
+        "--menu-limit",
+        type=int,
+        default=settings.MENU_BACKFILL_LIMIT,
+        help="max menu trays per scheduled backfill",
+    )
     p_sch.set_defaults(func=cmd_schedule)
 
     args = parser.parse_args()

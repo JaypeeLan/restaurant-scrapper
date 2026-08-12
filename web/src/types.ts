@@ -141,6 +141,7 @@ export interface Summary {
   postsLast7d: number;
   highlights: number;
   menus?: number;
+  menuItems?: number;
   events: number;
   generatedAt: string;
   now?: string;
@@ -282,6 +283,19 @@ export interface AccountQuery {
   sort?: 'nextFetchAt' | 'lastFetchedAt' | 'handle' | 'consecutiveFailures' | 'newestPostedAt';
 }
 
+/** Product MenuType-shaped draft from highlight OCR. */
+export interface MenuItem {
+  _id: string;
+  restaurant: string;
+  itemName: string;
+  description: string;
+  price: number;
+  category: string;
+  type: 'Food' | 'Drink';
+  section: string;
+  sourceTrayId?: string;
+}
+
 export interface Highlight {
   id: string;
   handle: string;
@@ -291,6 +305,10 @@ export interface Highlight {
   mediaCount: number | null;
   permalink?: string;
   kind?: 'menu' | 'highlight';
+  menuItems?: MenuItem[];
+  menuItemCount?: number;
+  menuStatus?: string | null;
+  menuExtractedAt?: string | null;
   firstSeenAt?: string;
   updatedAt?: string;
 }
@@ -299,6 +317,7 @@ export interface HighlightProfile {
   handle: string;
   menuCount: number;
   highlightCount: number;
+  menuItemCount?: number;
   highlights: Highlight[];
 }
 

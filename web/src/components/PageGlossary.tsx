@@ -74,9 +74,14 @@ export const TAB_GLOSSARIES: Record<string, GlossaryTerm[]> = {
         'An Instagram Stories highlight tray whose title looks like a menu (Menu, Food, Drinks, Wine, etc.). Most venues keep the live menu here.',
     },
     {
+      term: 'Menu items',
+      meaning:
+        'Dishes/drinks OCR’d from highlight slides into MenuType drafts (name, price, category, Food|Drink, section). Expand a tray to review them. Re-scraped weekly (or via backfill-menus).',
+    },
+    {
       term: 'Cover',
       meaning:
-        'Highlight tray thumbnail from ingest. Slide images inside the tray are not scraped yet — Open on Instagram to browse them.',
+        'Highlight tray thumbnail from ingest. Open a tray for extracted items, or Instagram for the original slides.',
     },
     {
       term: 'Menus only',

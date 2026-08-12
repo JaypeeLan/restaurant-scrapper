@@ -398,6 +398,17 @@ def upsert_highlights(db, handle: str, trays: list[dict[str, Any]]) -> int:
     return result.upserted_count
 
 
+def upsert_highlight_menu(db, doc_id: str, payload: dict[str, Any]) -> None:
+    """Persist slides + MenuType drafts onto an existing highlight tray doc."""
+    data = dict(payload)
+    data["updatedAt"] = _now()
+    db[settings.COL_HIGHLIGHTS].update_one(
+        {"_id": doc_id},
+        {"$set": data, "$setOnInsert": {"firstSeenAt": _now()}},
+        upsert=True,
+    )
+
+
 # ── run bookkeeping ───────────────────────────────────────────────────────────
 
 

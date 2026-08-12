@@ -9,6 +9,7 @@ Blueprint: [`render.yaml`](../render.yaml)
 | `ig-ingest-api` | Web (Free) | always on* | API + dashboard at `/` |
 | `ig-ingest-cron` | Cron (Starter) | every 30 min UTC | `python main.py ingest` |
 | `ig-discover-cron` | Cron (Starter) | every 4h UTC (`15 */4 * * *`) | `python main.py discover --backend osm --ingest-after` |
+| `ig-menu-cron` | Cron (Starter) | weekly Sundays 03:30 UTC | `python main.py backfill-menus --limit 40` |
 | `ig-keepalive-cron` | Cron (Starter) | every 10 min | ping `/api/health` (keeps free web awake) |
 
 Dashboard UI is better on **Vercel** (instant HTML) — see [deploy-vercel.md](deploy-vercel.md).
@@ -65,6 +66,9 @@ Playwright stays the fallback.
 | `INGEST_EVERY_MINUTES` | `30` (shown on Runs UI; match cron) |
 | `INGEST_LIMIT` | `40` |
 | `DISCOVER_EVERY_HOURS` | `24` |
+| `MENU_EVERY_DAYS` | `7` (weekly menu tray re-extract) |
+| `MENU_BACKFILL_LIMIT` | `40` |
+| `MENU_CRON` | `30 3 * * 0` (Sundays 03:30 UTC) |
 | `LOG_LEVEL` | `INFO` |
 
 4. Apply the Blueprint. Confirm all three services share `ig-ingest-env`.

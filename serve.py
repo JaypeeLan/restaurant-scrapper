@@ -103,10 +103,26 @@ def _discover_cron_expr() -> str | None:
     return f"{minute} */{every_h} * * *"
 
 
+def _next_menu_at(now: datetime) -> datetime | None:
+    """
+    Next Sunday 03:30 UTC (matches default MENU_CRON ``30 3 * * 0``).
+    Falls back to parsing is deferred — cron string is informational in the UI.
+    """
+    # weekday: Mon=0 … Sun=6
+    days_ahead = (6 - now.weekday()) % 7
+    candidate = (now + timedelta(days=days_ahead)).replace(
+        hour=3, minute=30, second=0, microsecond=0
+    )
+    if candidate <= now:
+        candidate = candidate + timedelta(days=7)
+    return candidate
+
+
 def _schedule_next() -> dict[str, Any]:
     now = _now()
     nxt_ingest = _next_ingest_at(now)
     nxt_discover = _next_discover_at(now)
+    nxt_menu = _next_menu_at(now) if settings.MENU_EVERY_DAYS > 0 else None
     return {
         "now": _iso(now),
         "nextIngestAt": _iso(nxt_ingest),
@@ -115,8 +131,13 @@ def _schedule_next() -> dict[str, Any]:
         "nextDiscoverInSeconds": (
             max(0, int((nxt_discover - now).total_seconds())) if nxt_discover else None
         ),
+        "nextMenuAt": _iso(nxt_menu) if nxt_menu else None,
+        "nextMenuInSeconds": (
+            max(0, int((nxt_menu - now).total_seconds())) if nxt_menu else None
+        ),
         "ingestCron": f"*/{max(1, settings.INGEST_EVERY_MINUTES)} * * * *",
         "discoverCron": _discover_cron_expr(),
+        "menuCron": settings.MENU_CRON if settings.MENU_EVERY_DAYS > 0 else None,
     }
 
 
@@ -299,6 +320,20 @@ def summary() -> dict[str, Any]:
         "menus": db[settings.COL_HIGHLIGHTS].count_documents(
             {"title": {"$regex": _MENU_HIGHLIGHT_RE.pattern, "$options": "i"}}
         ),
+        "menuItems": int(
+            (
+                next(
+                    db[settings.COL_HIGHLIGHTS].aggregate(
+                        [
+                            {"$match": {"menuItemCount": {"$gt": 0}}},
+                            {"$group": {"_id": None, "n": {"$sum": "$menuItemCount"}}},
+                        ]
+                    ),
+                    {"n": 0},
+                )
+            ).get("n")
+            or 0
+        ),
         "events": len(events),
         "generatedAt": _iso(_now()),
         **_schedule_next(),
@@ -427,6 +462,9 @@ def _schedule_meta() -> dict[str, Any]:
         "discoverCity": settings.DISCOVER_CITY,
         "discoverPlaceLimit": settings.DISCOVER_PLACE_LIMIT,
         "discoverResolveLimit": settings.DISCOVER_RESOLVE_LIMIT,
+        "menuEveryDays": settings.MENU_EVERY_DAYS,
+        "menuBackfillLimit": settings.MENU_BACKFILL_LIMIT,
+        "menuCron": settings.MENU_CRON if settings.MENU_EVERY_DAYS > 0 else None,
         "tierIntervalsHours": settings.TIER_INTERVALS_HOURS,
         "fallbackMaxPerRun": settings.IG_FALLBACK_MAX_PER_RUN,
         "fallbackEnabled": settings.IG_FALLBACK_ENABLED,
@@ -527,14 +565,16 @@ def list_highlights(
         description="Only trays whose title looks like a menu (food/drinks/etc.)",
     ),
     grouped: bool = Query(True, description="group by handle"),
+    include_slides: bool = Query(
+        False,
+        description="Include slide image URLs + OCR (heavy). Default omits slides.",
+    ),
     limit: int = Query(100, ge=1, le=500),
     skip: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     """
-    Instagram highlight trays (cover + title). Menus live here for most venues.
-
-    Slide images are not stored yet — this surfaces which accounts publish a
-    Menu/Food/Drinks highlight and links into Instagram.
+    Instagram highlight trays. Menu trays may include extracted ``menuItems``
+    shaped like product MenuType drafts (itemName, price, category, type, section).
     """
     db = _db()
     query: dict[str, Any] = {}
@@ -554,9 +594,12 @@ def list_highlights(
         query["$and"] = title_clauses
 
     total = db[settings.COL_HIGHLIGHTS].count_documents(query)
+    projection: dict[str, int] | None = None
+    if not include_slides:
+        projection = {"slides": 0}
     cursor = (
         db[settings.COL_HIGHLIGHTS]
-        .find(query)
+        .find(query, projection)
         .sort([("handle", 1), ("title", 1)])
         .skip(skip)
         .limit(limit)
@@ -571,6 +614,12 @@ def list_highlights(
             if _MENU_HIGHLIGHT_RE.search(str(item.get("title") or ""))
             else "highlight"
         )
+        items_list = item.get("menuItems")
+        if not isinstance(items_list, list):
+            item["menuItems"] = []
+            item["menuItemCount"] = int(item.get("menuItemCount") or 0)
+        else:
+            item["menuItemCount"] = int(item.get("menuItemCount") or len(items_list))
 
     if not grouped:
         return {
@@ -594,10 +643,13 @@ def list_highlights(
                 "handle": h,
                 "menuCount": sum(1 for t in trays if t.get("kind") == "menu"),
                 "highlightCount": len(trays),
+                "menuItemCount": sum(int(t.get("menuItemCount") or 0) for t in trays),
                 "highlights": trays,
             }
         )
-    profiles.sort(key=lambda p: (-p["menuCount"], -p["highlightCount"], p["handle"]))
+    profiles.sort(
+        key=lambda p: (-p["menuItemCount"], -p["menuCount"], -p["highlightCount"], p["handle"])
+    )
 
     return {
         "grouped": True,

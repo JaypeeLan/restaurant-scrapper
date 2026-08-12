@@ -4,10 +4,12 @@
 #   1. Web API (Free)   → uvicorn + built dashboard at /
 #   2. Ingest cron      → every 30 min (Starter, billed while running)
 #   3. Discover cron    → every 4h + ingest after seed (Starter)
+#   4. Menu cron        → weekly Sundays 03:30 UTC (Starter)
+#   5. Keepalive cron   → every 10 min
 #
 # Environment group `ig-ingest-env` holds Mongo / cookies / DeepSeek secrets.
-# Keep INGEST_EVERY_MINUTES / DISCOVER_EVERY_HOURS in sync with the cron
-# schedules below so the Runs UI matches reality.
+# Keep INGEST_EVERY_MINUTES / DISCOVER_EVERY_HOURS / MENU_CRON in sync with
+# the cron schedules below so the Runs UI matches reality.
 
 services:
   - type: web
@@ -47,6 +49,21 @@ services:
     schedule: "15 */4 * * *"
     buildCommand: bash scripts/build_cron.sh
     startCommand: python main.py discover --backend osm --ingest-after
+    envVars:
+      - fromGroup: ig-ingest-env
+
+  # Menus change rarely. Re-OCR / re-structure highlight trays weekly.
+  # Needs IG cookies + (ideally) tesseract; without tesseract OCR is empty.
+  - type: cron
+    name: ig-menu-cron
+    runtime: python
+    plan: starter
+    region: oregon
+    repo: https://github.com/JaypeeLan/restaurant-scrapper
+    branch: main
+    schedule: "30 3 * * 0"
+    buildCommand: bash scripts/build_cron.sh
+    startCommand: python main.py backfill-menus --limit 40
     envVars:
       - fromGroup: ig-ingest-env
 
@@ -100,6 +117,12 @@ envVarGroups:
         value: "4"
       - key: DISCOVER_CRON_MINUTE
         value: "15"
+      - key: MENU_EVERY_DAYS
+        value: "7"
+      - key: MENU_BACKFILL_LIMIT
+        value: "40"
+      - key: MENU_CRON
+        value: "30 3 * * 0"
       - key: LOG_LEVEL
         value: INFO
       - key: IG_FALLBACK_MAX_PER_RUN

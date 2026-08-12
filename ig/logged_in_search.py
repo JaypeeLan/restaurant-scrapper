@@ -272,6 +272,107 @@ def topsearch_users(query: str, *, limit: int = 10) -> list[dict[str, Any]]:
     return out[: max(1, limit)]
 
 
+_REELS_MEDIA = "https://www.instagram.com/api/v1/feed/reels_media/"
+
+
+def _best_image_url(item: dict[str, Any]) -> str | None:
+    iv = item.get("image_versions2") or {}
+    cands = iv.get("candidates") or []
+    if not cands:
+        return None
+    best = max(cands, key=lambda c: (c.get("width") or 0) * (c.get("height") or 0))
+    url = best.get("url")
+    return str(url) if url else None
+
+
+def fetch_highlight_slides(
+    tray_id: str,
+    *,
+    max_slides: int | None = None,
+) -> dict[str, Any]:
+    """
+    Logged-in fetch of highlight reel slides (images inside a tray).
+
+    Uses ``/api/v1/feed/reels_media/?reel_ids=highlight:{trayId}``.
+    Returns ``{trayId, title, coverUrl, slides:[{id, order, mediaType, imageUrl}]}``.
+    """
+    if not session_configured():
+        raise LoggedInAuthError(
+            "IG_SESSIONID and IG_CSRFTOKEN required to fetch highlight slides"
+        )
+    tid = str(tray_id or "").strip()
+    if not tid:
+        raise ValueError("tray_id required")
+
+    reel_key = f"highlight:{tid}"
+    url = f"{_REELS_MEDIA}?reel_ids={quote(reel_key)}"
+    headers = {
+        **_headers(),
+        "referer": f"https://www.instagram.com/stories/highlights/{tid}/",
+    }
+    try:
+        with httpx.Client(timeout=45.0, follow_redirects=True) as client:
+            resp = client.get(url, headers=headers)
+    except httpx.HTTPError as exc:
+        raise LoggedInAuthError(f"highlight slides network error: {exc}") from exc
+
+    if resp.status_code in (401, 403):
+        raise LoggedInAuthError(
+            f"highlight slides HTTP {resp.status_code} — refresh cookies"
+        )
+    if resp.status_code == 429:
+        raise LoggedInAuthError("highlight slides rate-limited (429)")
+    if resp.status_code >= 400:
+        raise LoggedInAuthError(
+            f"highlight slides HTTP {resp.status_code}: {(resp.text or '')[:200]}"
+        )
+
+    try:
+        payload = resp.json()
+    except ValueError as exc:
+        raise LoggedInAuthError("highlight slides returned non-JSON") from exc
+
+    reels = payload.get("reels") or {}
+    reel = reels.get(reel_key) or {}
+    if not reel:
+        # sometimes only reels_media list
+        for row in payload.get("reels_media") or []:
+            if isinstance(row, dict) and str(row.get("id") or "").endswith(tid):
+                reel = row
+                break
+    if not reel:
+        raise LoggedInAuthError(f"no reel payload for highlight:{tid}")
+
+    cover = ((reel.get("cover_media") or {}).get("cropped_image_version") or {}).get(
+        "url"
+    ) or ((reel.get("cover_media") or {}).get("thumbnail_src"))
+
+    slides: list[dict[str, Any]] = []
+    items = reel.get("items") or []
+    limit = len(items) if max_slides is None else max(0, int(max_slides))
+    for idx, item in enumerate(items[:limit]):
+        if not isinstance(item, dict):
+            continue
+        image_url = _best_image_url(item)
+        if not image_url:
+            continue
+        slides.append(
+            {
+                "id": str(item.get("pk") or item.get("id") or f"{tid}:{idx}"),
+                "order": idx,
+                "mediaType": int(item.get("media_type") or 0) or None,
+                "imageUrl": image_url,
+            }
+        )
+
+    return {
+        "trayId": tid,
+        "title": reel.get("title"),
+        "coverUrl": cover,
+        "mediaCount": len(items),
+        "slides": slides,
+    }
+
 def search_best_handle(
     query: str,
     *,

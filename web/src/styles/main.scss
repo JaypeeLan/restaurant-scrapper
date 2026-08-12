@@ -854,8 +854,25 @@ a {
   border-radius: $r-md;
   display: flex;
   flex-direction: column;
+  grid-column: span 1;
   min-width: 0;
   overflow: hidden;
+
+  &--open {
+    grid-column: 1 / -1;
+  }
+
+  &__toggle {
+    background: transparent;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    text-align: left;
+    width: 100%;
+  }
 
   &__cover {
     aspect-ratio: 1;
@@ -899,11 +916,67 @@ a {
     gap: $s-2 $s-3;
   }
 
+  &__count {
+    color: $text;
+    font-weight: 600;
+  }
+
   &__kind {
     color: $accent;
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
+  }
+
+  &__chev {
+    margin-left: auto;
+  }
+
+  &__detail {
+    border-top: 1px solid $border;
+    display: flex;
+    flex-direction: column;
+    gap: $s-3;
+    padding: $s-3;
+  }
+
+  &__ig {
+    font-size: $fs-xs;
+  }
+
+  &__empty {
+    color: $text-faint;
+    font-size: $fs-sm;
+    margin: 0;
+  }
+}
+
+.menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: $s-2;
+
+  &__title {
+    font-size: $fs-sm;
+    font-weight: 600;
+    margin: 0;
+  }
+}
+
+.menu-table {
+  &__name {
+    font-weight: 600;
+  }
+
+  &__desc {
+    color: $text-faint;
+    font-size: $fs-xs;
+    margin-top: 2px;
+  }
+
+  &__price {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 }
 

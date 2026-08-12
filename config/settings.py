@@ -152,6 +152,12 @@ DISCOVER_EVERY_HOURS: int = _int("DISCOVER_EVERY_HOURS", 4)
 DISCOVER_CRON_HOUR: int = _int("DISCOVER_CRON_HOUR", 3)
 DISCOVER_CRON_MINUTE: int = _int("DISCOVER_CRON_MINUTE", 15)
 
+# Menu highlight slides → OCR → MenuType. Menus change rarely — weekly is enough.
+MENU_EVERY_DAYS: int = _int("MENU_EVERY_DAYS", 7)
+MENU_BACKFILL_LIMIT: int = _int("MENU_BACKFILL_LIMIT", 40)
+# Cron expression for UI / docs (Render `ig-menu-cron` should match).
+MENU_CRON: str = _str("MENU_CRON", "30 3 * * 0")  # Sundays 03:30 UTC
+
 
 def preflight() -> list[str]:
     """Return a list of blocking config problems (empty == good to run)."""
