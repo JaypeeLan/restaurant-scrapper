@@ -234,7 +234,7 @@ export interface EventsResponse {
     enabled: boolean;
     model: string | null;
     refined: number;
-    requested?: boolean;
+    live?: boolean;
     ocrFetch?: boolean;
   };
   profiles?: EventProfileGroup[];

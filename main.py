@@ -127,7 +127,26 @@ def cmd_capacity(_: argparse.Namespace) -> int:
 def cmd_ingest(args: argparse.Namespace) -> int:
     from run_ingest import ingest
 
-    asyncio.run(ingest(limit=args.limit, tier=args.tier, dry_run=args.dry_run))
+    summary = asyncio.run(ingest(limit=args.limit, tier=args.tier, dry_run=args.dry_run))
+    if args.dry_run or not settings.DEEPSEEK_ENABLED:
+        return 0
+    from pipeline import deepseek_extract
+
+    db = store.get_db()
+    stats = deepseek_extract.backfill_llm(
+        db,
+        limit=settings.LLM_BACKFILL_LIMIT,
+        dry_run=False,
+    )
+    log.info("post-ingest llm backfill: %s", stats)
+    store.record_run(
+        db,
+        {
+            "kind": "llm_backfill",
+            "parentKind": "ingest",
+            **stats,
+        },
+    )
     return 0
 
 
@@ -157,6 +176,39 @@ def cmd_backfill_ocr(args: argparse.Namespace) -> int:
             **stats,
         },
     )
+    return 0 if stats.get("error", 0) == 0 or stats.get("ok", 0) > 0 else 1
+
+
+def cmd_backfill_llm(args: argparse.Namespace) -> int:
+    """Live DeepSeek refine on experience posts (background only)."""
+    from pipeline import deepseek_extract
+
+    db = store.get_db()
+    store.ensure_indexes(db)
+    stats = deepseek_extract.backfill_llm(
+        db,
+        limit=args.limit,
+        handle=args.handle,
+        force=args.force,
+        dry_run=args.dry_run,
+    )
+    print(
+        f"llm backfill scanned={stats['scanned']} updated={stats['updated']} "
+        f"ok={stats['ok']} skipped={stats['skipped']} "
+        f"notExperience={stats['notExperience']} error={stats['error']}"
+        + (" (dry-run)" if args.dry_run else "")
+        + (" (disabled)" if stats.get("disabled") else "")
+    )
+    store.record_run(
+        db,
+        {
+            "kind": "llm_backfill",
+            "dryRun": bool(args.dry_run),
+            **stats,
+        },
+    )
+    if stats.get("disabled"):
+        return 0
     return 0 if stats.get("error", 0) == 0 or stats.get("ok", 0) > 0 else 1
 
 
@@ -552,6 +604,25 @@ def main() -> int:
     )
     p_ocr.add_argument("--dry-run", action="store_true")
     p_ocr.set_defaults(func=cmd_backfill_ocr)
+
+    p_llm = sub.add_parser(
+        "backfill-llm",
+        help="DeepSeek refine experience posts (stores llmName/llmExtract)",
+    )
+    p_llm.add_argument(
+        "--limit",
+        type=int,
+        default=settings.LLM_BACKFILL_LIMIT,
+        help="max live API calls this run",
+    )
+    p_llm.add_argument("--handle", help="only this @handle")
+    p_llm.add_argument(
+        "--force",
+        action="store_true",
+        help="re-refine even when llmName already set",
+    )
+    p_llm.add_argument("--dry-run", action="store_true")
+    p_llm.set_defaults(func=cmd_backfill_llm)
 
     p_menu = sub.add_parser(
         "backfill-menus",

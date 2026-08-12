@@ -376,3 +376,139 @@ def merge_into_draft(
         "isExperience": bool(llm.get("isExperience", True)),
     }
     return draft
+
+
+def backfill_llm(
+    db: Any,
+    *,
+    limit: int = 25,
+    handle: str | None = None,
+    force: bool = False,
+    dry_run: bool = False,
+    min_score: int = 2,
+) -> dict[str, int]:
+    """
+    Live DeepSeek refine for experience-like posts; persist llmName/llmExtract.
+
+    Intended for ingest cron / CLI — never called from the read API.
+    """
+    from datetime import datetime, timezone
+
+    from pipeline import event_extract
+
+    if not enabled():
+        return {
+            "scanned": 0,
+            "updated": 0,
+            "ok": 0,
+            "skipped": 0,
+            "error": 0,
+            "notExperience": 0,
+            "disabled": 1,
+        }
+
+    query: dict[str, Any] = {}
+    if handle:
+        query["handle"] = handle.strip().lstrip("@").lower()
+    if not force:
+        query["$or"] = [
+            {"llmAt": {"$exists": False}},
+            {"llmStatus": {"$in": ["error"]}},
+            {"llmName": None},
+            {"llmName": ""},
+            {"llmName": {"$exists": False}},
+        ]
+
+    cursor = (
+        db[settings.COL_POSTS]
+        .find(query)
+        .sort([("postedAt", -1)])
+        .limit(max(limit * 4, limit))
+    )
+
+    stats = {
+        "scanned": 0,
+        "updated": 0,
+        "ok": 0,
+        "skipped": 0,
+        "error": 0,
+        "notExperience": 0,
+        "disabled": 0,
+    }
+    profiles: dict[str, dict[str, Any]] = {}
+    network_used = 0
+
+    for post in cursor:
+        if network_used >= limit:
+            break
+        stats["scanned"] += 1
+        handle_key = (post.get("handle") or "").lower()
+        if handle_key and handle_key not in profiles:
+            row = db[settings.COL_ACCOUNTS].find_one(
+                {"handle": handle_key},
+                {"handle": 1, "profile.name": 1, "profile.website": 1},
+            )
+            prof = (row or {}).get("profile") or {}
+            profiles[handle_key] = {
+                "name": prof.get("name"),
+                "website": prof.get("website"),
+            }
+
+        profile = profiles.get(handle_key) or {}
+        draft = event_extract.experience_from_post(
+            post,
+            profile_name=profile.get("name"),
+            profile_website=profile.get("website"),
+            use_llm=True,
+            llm_allow_network=True,
+            llm_use_cache=not force,
+            ocr_allow_fetch=True,
+        )
+        if not draft or int(draft.get("score") or 0) < min_score:
+            stats["notExperience"] += 1
+            continue
+
+        persist = draft.get("_llmPersist")
+        llm_meta = draft.get("llm") or {}
+        if not persist:
+            if llm_meta.get("cached"):
+                stats["skipped"] += 1
+            elif llm_meta.get("error"):
+                stats["error"] += 1
+            else:
+                stats["skipped"] += 1
+            continue
+
+        if dry_run:
+            log.info(
+                "[llm-backfill] dry %s → name=%r",
+                post.get("_id"),
+                persist.get("llmName"),
+            )
+            stats["updated"] += 1
+            stats["ok"] += 1
+            network_used += 1
+            continue
+
+        try:
+            db[settings.COL_POSTS].update_one({"_id": post["_id"]}, {"$set": persist})
+            stats["updated"] += 1
+            stats["ok"] += 1
+            network_used += 1
+        except Exception as exc:  # noqa: BLE001
+            log.warning("[llm-backfill] persist %s failed: %s", post.get("_id"), exc)
+            stats["error"] += 1
+            try:
+                db[settings.COL_POSTS].update_one(
+                    {"_id": post["_id"]},
+                    {
+                        "$set": {
+                            "llmStatus": "error",
+                            "llmAt": datetime.now(timezone.utc),
+                        }
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+    return stats

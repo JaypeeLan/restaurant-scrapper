@@ -106,8 +106,9 @@ DEEPSEEK_ENABLED: bool = _bool("DEEPSEEK_ENABLED", bool(DEEPSEEK_API_KEY))
 # Skip thinking mode for faster/cheaper structured JSON extraction.
 DEEPSEEK_THINKING: bool = _bool("DEEPSEEK_THINKING", False)
 DEEPSEEK_TIMEOUT_S: int = _int("DEEPSEEK_TIMEOUT_S", 45)
-# Cap live LLM calls per /api/events pass (rest use cache or heuristics).
+# Cap live DeepSeek calls per background backfill batch (ingest cron / CLI).
 DEEPSEEK_MAX_PER_REQUEST: int = _int("DEEPSEEK_MAX_PER_REQUEST", 25)
+LLM_BACKFILL_LIMIT: int = _int("LLM_BACKFILL_LIMIT", DEEPSEEK_MAX_PER_REQUEST)
 
 # ── Logged-in Instagram session (handle discovery ONLY) ───────────────────────
 # Paste fresh browser cookies into .env. Never commit. Rotate if leaked.

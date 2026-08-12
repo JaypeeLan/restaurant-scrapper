@@ -123,6 +123,8 @@ envVarGroups:
         value: "40"
       - key: MENU_CRON
         value: "30 3 * * 0"
+      - key: LLM_BACKFILL_LIMIT
+        value: "25"
       - key: LOG_LEVEL
         value: INFO
       - key: IG_FALLBACK_MAX_PER_RUN

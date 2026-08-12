@@ -137,7 +137,6 @@ export function EventBoard() {
           grouped: true,
           limit: LIMIT,
           skip,
-          llm: false,
         },
         signal,
       ),

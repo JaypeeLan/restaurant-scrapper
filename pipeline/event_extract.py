@@ -835,10 +835,11 @@ def experience_from_post(
     profile_website: str | None = None,
     source_type: str = "Restaurant",
     use_card_ocr: bool = True,
-    use_llm: bool | None = None,
-    llm_allow_network: bool = True,
+    use_llm: bool = False,
+    llm_allow_network: bool = False,
+    llm_use_cache: bool = True,
     ocr_text: str | None = None,
-    ocr_allow_fetch: bool = True,
+    ocr_allow_fetch: bool = False,
 ) -> dict[str, Any] | None:
     """
     Build a partial ExperienceType draft from one IG post.
@@ -846,8 +847,8 @@ def experience_from_post(
     The experience gate uses caption + flyer OCR (when available), so a thin
     caption with a detailed flyer still qualifies.
 
-    Name priority: DeepSeek (stored ``llmName`` or live) → usable flyer OCR →
-    caption heuristics. Unusable OCR junk never beats the caption.
+    Name priority: stored DeepSeek (``llmName`` / ``llmExtract``) → usable flyer
+    OCR → caption heuristics. Live DeepSeek only when ``use_llm=True`` (background).
     """
     caption = (post.get("caption") or "").strip()
     if isinstance(caption, dict):
@@ -1022,21 +1023,30 @@ def experience_from_post(
         "experience": experience,
     }
 
-    should_llm = use_llm if use_llm is not None else None
-    if should_llm is None:
-        from pipeline import deepseek_extract
+    from pipeline import deepseek_extract
 
-        should_llm = deepseek_extract.enabled()
+    stored_extract = post.get("llmExtract")
+    if isinstance(stored_extract, dict) and stored_extract.get("name"):
+        llm_stored = dict(stored_extract)
+        llm_stored["_cached"] = True
+        llm_stored["_model"] = post.get("llmModel") or settings.DEEPSEEK_MODEL
+        if llm_stored.get("isExperience") is False:
+            return None
+        draft = deepseek_extract.merge_into_draft(draft, llm_stored)
+        exp2 = draft["experience"]
+        missing2 = [k for k in _FILLABLE if _is_empty(exp2.get(k))]
+        missing2.extend(k for k in _NEEDS_PRODUCT if _is_empty(exp2.get(k)))
+        draft["filled"] = [k for k in _FILLABLE if k not in missing2]
+        draft["missing"] = missing2
 
-    if should_llm:
+    if use_llm:
         try:
-            from pipeline import deepseek_extract
-
             llm = deepseek_extract.extract_experience_fields(
                 post,
                 heuristic_name=caption_name,
                 profile_name=profile_name,
                 allow_network=llm_allow_network,
+                use_cache=llm_use_cache,
                 ocr_text=flyer_text,
                 ocr_allow_fetch=ocr_allow_fetch,
             )
@@ -1107,14 +1117,13 @@ def extract_events(
     min_score: int = _MIN_SCORE,
     profiles: dict[str, dict[str, Any]] | None = None,
     use_card_ocr: bool = True,
-    use_llm: bool | None = None,
-    ocr_allow_fetch: bool = True,
+    use_llm: bool = False,
+    llm_use_cache: bool = True,
+    ocr_allow_fetch: bool = False,
     dedupe: bool = True,
 ) -> list[dict[str, Any]]:
-    from pipeline import deepseek_extract
-
     profiles = profiles or {}
-    llm_on = deepseek_extract.enabled() if use_llm is None else use_llm
+    llm_on = use_llm
     budget = settings.DEEPSEEK_MAX_PER_REQUEST if llm_on else 0
     network_used = 0
 
@@ -1130,6 +1139,7 @@ def extract_events(
             use_card_ocr=use_card_ocr,
             use_llm=llm_on,
             llm_allow_network=allow_network,
+            llm_use_cache=llm_use_cache,
             ocr_allow_fetch=ocr_allow_fetch,
         )
         if event and event.get("llm") and not event["llm"].get("cached") and allow_network:

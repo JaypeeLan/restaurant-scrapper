@@ -77,7 +77,6 @@ export const api = {
       grouped?: boolean;
       limit?: number;
       skip?: number;
-      llm?: boolean;
     } = {},
     signal?: AbortSignal,
   ) => request<EventsResponse>('/events', q as Record<string, unknown>, signal),
