@@ -127,7 +127,7 @@ function MenuItemRow({ row }: { row: MenuItem }) {
 }
 
 function MenuSection({ section, items }: { section: string; items: MenuItem[] }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
 
   return (
     <section className={`menu-section${open ? ' menu-section--open' : ''}`}>
@@ -155,7 +155,7 @@ function MenuSection({ section, items }: { section: string; items: MenuItem[] })
 }
 
 function HighlightTray({ item }: { item: Highlight }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const menuItems = item.menuItems ?? [];
   const sections = useMemo(() => groupBySection(menuItems), [menuItems]);
   const count = sections.reduce((n, s) => n + s.items.length, 0);
@@ -211,7 +211,7 @@ function HighlightTray({ item }: { item: Highlight }) {
 }
 
 function ProfileBlock({ profile }: { profile: HighlightProfile }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const itemTotal = profile.menuItemCount ?? 0;
   const trayLabel =
     profile.menuCount === 1 ? 'Menu' : `${profile.menuCount} menus`;
