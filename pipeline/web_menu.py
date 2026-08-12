@@ -30,15 +30,22 @@ _USER_AGENT = (
 
 LINKTREE_RE = re.compile(r"(?:^|\.)linktr\.ee$|(?:^|\.)linktree\.com$", re.I)
 MENU_HINT_RE = re.compile(
-    r"menu|food|drink|beverage|wine|cocktail|brunch|kitchen|bar|dinner|lunch|"
+    r"menu|food|drink|beverage|wine|cocktail|brunch|kitchen|\bbar\b|dinner|lunch|"
     r"pastr(?:y|ies)|takeaway|cigar|spirits|beer",
     re.I,
 )
 SKIP_URL_RE = re.compile(
     r"instagram\.com|facebook\.com|tiktok\.com|twitter\.com|x\.com|linkedin\.com|"
-    r"youtube\.com|threads\.net|whatsapp\.com|tel:|mailto:",
+    r"youtube\.com|threads\.net|whatsapp\.com|wa\.me|tel:|mailto:",
     re.I,
 )
+JUNK_URL_RE = re.compile(
+    r"\[%|\{%|\{\{|<%=|item\.|downloadLink|"
+    r"\.css(?:\?|$)|favicon|layout\.css|styles\.css|reset-min|flexslider|/main\.css",
+    re.I,
+)
+JUNK_TITLE_RE = re.compile(r"\[%|\{%|\{\{|<%=|item\.|downloadLink", re.I)
+STATIC_EXT_RE = re.compile(r"\.(css|js|ico|png|jpe?g|gif|svg|woff2?|ttf|map)(?:\?|$)", re.I)
 
 
 @dataclass(frozen=True)
@@ -71,6 +78,30 @@ def _slug(url: str) -> str:
 def _is_pdf(url: str) -> bool:
     path = urlparse(url).path.lower()
     return path.endswith(".pdf") or ".pdf" in path
+
+
+def _url_path(url: str) -> str:
+    parsed = urlparse(url)
+    return parsed.path or "/"
+
+
+def _clean_title(raw: str) -> str:
+    title = re.sub(r"\s+", " ", (raw or "")).strip()
+    if not title or JUNK_TITLE_RE.search(title):
+        return ""
+    return title[:80]
+
+
+def _is_usable_menu_url(url: str) -> bool:
+    if not url.startswith("http"):
+        return False
+    if SKIP_URL_RE.search(url) or JUNK_URL_RE.search(url):
+        return False
+    if STATIC_EXT_RE.search(urlparse(url).path):
+        return False
+    if _is_pdf(url):
+        return True
+    return bool(MENU_HINT_RE.search(_url_path(url)))
 
 
 def _kind_for_url(url: str) -> str:
@@ -167,7 +198,7 @@ def _parse_linktree(html: str, profile_url: str) -> list[WebMenuSource]:
             continue
         if not url:
             continue
-        if SKIP_URL_RE.search(url):
+        if not _is_usable_menu_url(url):
             continue
         if not MENU_HINT_RE.search(title) and not _is_pdf(url):
             continue
@@ -190,19 +221,20 @@ def _discover_html_links(html: str, base_url: str) -> list[WebMenuSource]:
         if href.startswith("#") or href.startswith("javascript:"):
             continue
         url = urljoin(base_url, href)
-        if SKIP_URL_RE.search(url):
+        if not _is_usable_menu_url(url):
             continue
-        if not MENU_HINT_RE.search(url) and not MENU_HINT_RE.search(href):
-            if not _is_pdf(url):
-                continue
         key = url.rstrip("/").lower()
         if key in seen:
             continue
         seen.add(key)
-        title = href.rsplit("/", 1)[-1].replace("-", " ").replace("_", " ").strip() or "Menu"
+        title = _clean_title(href.rsplit("/", 1)[-1].replace("-", " ").replace("_", " "))
+        if not title:
+            title = _clean_title(_url_path(url).rsplit("/", 1)[-1].replace("-", " "))
+        if not title:
+            continue
         out.append(
             WebMenuSource(
-                title=title[:80],
+                title=title,
                 url=url,
                 kind=_kind_for_url(url),
                 aggregator="website",
@@ -313,6 +345,31 @@ def url_to_menu_text(source: WebMenuSource) -> str:
     return _html_to_text(html)
 
 
+def is_junk_web_menu(doc: dict[str, Any]) -> bool:
+    if doc.get("sourceType") != "web":
+        return False
+    title = str(doc.get("title") or "")
+    menu_url = str(doc.get("menuUrl") or "")
+    if JUNK_TITLE_RE.search(title) or JUNK_URL_RE.search(menu_url):
+        return True
+    if menu_url and not _is_usable_menu_url(menu_url):
+        return True
+    return False
+
+
+def purge_junk_web_menus(db: Any) -> int:
+    """Remove previously stored template/CSS junk from web menu docs."""
+    cursor = db[settings.COL_HIGHLIGHTS].find(
+        {"sourceType": "web"},
+        {"title": 1, "menuUrl": 1, "sourceType": 1},
+    )
+    ids = [doc["_id"] for doc in cursor if is_junk_web_menu(doc)]
+    if not ids:
+        return 0
+    result = db[settings.COL_HIGHLIGHTS].delete_many({"_id": {"$in": ids}})
+    return int(result.deleted_count)
+
+
 def backfill_web_menus(
     db: Any,
     *,
@@ -328,6 +385,7 @@ def backfill_web_menus(
     from pipeline import menu_extract, store
 
     store.ensure_indexes(db)
+    purged = purge_junk_web_menus(db)
     every_days = max(1, int(every_days or settings.WEB_MENU_EVERY_DAYS))
     stale_before = datetime.now(timezone.utc) - timedelta(days=every_days)
 
@@ -349,6 +407,7 @@ def backfill_web_menus(
 
     stats = {
         "accounts": len(accounts),
+        "purged": purged,
         "sources": 0,
         "updated": 0,
         "ok": 0,

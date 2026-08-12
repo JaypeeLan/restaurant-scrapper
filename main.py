@@ -346,7 +346,8 @@ def cmd_backfill_web_menus(args: argparse.Namespace) -> int:
         every_days=args.every_days,
     )
     print(
-        f"web menus accounts={stats['accounts']} sources={stats['sources']} "
+        f"web menus accounts={stats['accounts']} purged={stats.get('purged', 0)} "
+        f"sources={stats['sources']} "
         f"updated={stats['updated']} ok={stats['ok']} empty={stats['empty']} "
         f"error={stats['error']} skipped={stats['skipped']}"
         + (" (dry-run)" if args.dry_run else "")

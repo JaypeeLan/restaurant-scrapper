@@ -254,6 +254,12 @@ def _menu_tray_filter() -> dict[str, Any]:
     }
 
 
+def _is_junk_web_menu_item(item: dict[str, Any]) -> bool:
+    from pipeline.web_menu import is_junk_web_menu
+
+    return is_junk_web_menu(item)
+
+
 def _experience_drafts(
     db: Any,
     *,
@@ -697,6 +703,7 @@ def list_highlights(
         .limit(limit)
     )
     items = [_clean(doc) for doc in cursor]
+    items = [item for item in items if not _is_junk_web_menu_item(item)]
     for item in items:
         is_web = item.get("sourceType") == "web"
         tray_id = item.get("trayId")
