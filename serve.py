@@ -85,6 +85,8 @@ _drafts_cache = _TtlCache(_API_CACHE_TTL_S)
 _summary_cache = _TtlCache(_API_CACHE_TTL_S, max_entries=4)
 _capacity_cache = _TtlCache(_API_CACHE_TTL_S, max_entries=4)
 _highlights_cache = _TtlCache(_HIGHLIGHTS_CACHE_TTL_S)
+_drafts_inflight: dict[Any, threading.Event] = {}
+_drafts_inflight_lock = threading.Lock()
 
 _ALLOWED_ORIGINS = [
     o.strip()
@@ -254,12 +256,10 @@ def _experience_drafts(
     Shared experience extraction for summary + /api/events.
 
     DeepSeek is the primary namer when configured (results persisted on posts as
-    ``llmName``). Usable flyer OCR beats caption; junk OCR does not.
+    ``llmName``).     Usable flyer OCR beats caption; junk OCR does not.
     """
-    from pipeline import deepseek_extract
-
     if use_llm is None:
-        use_llm = deepseek_extract.enabled()
+        use_llm = False
 
     handle_key = handle.strip().lstrip("@").lower() if handle else ""
     cache_key = (handle_key, int(min_score), bool(use_llm), bool(ocr_fetch))
@@ -267,57 +267,80 @@ def _experience_drafts(
     if cached is not None:
         return cached
 
-    query: dict[str, Any] = {}
-    if handle_key:
-        query["handle"] = handle_key
+    leader = False
+    done: threading.Event | None = None
+    with _drafts_inflight_lock:
+        done = _drafts_inflight.get(cache_key)
+        if done is None:
+            done = threading.Event()
+            _drafts_inflight[cache_key] = done
+            leader = True
 
-    posts = list(
-        db[settings.COL_POSTS]
-        .find(query, _EVENT_POST_PROJECTION)
-        .sort([("postedAt", -1)])
-        .limit(_EVENT_POST_LIMIT)
-    )
-    handles = list({(p.get("handle") or "").lower() for p in posts if p.get("handle")})
-    profiles: dict[str, dict[str, Any]] = {}
-    if handles:
-        for a in db[settings.COL_ACCOUNTS].find(
-            {"handle": {"$in": handles}},
-            {"handle": 1, "profile.name": 1, "profile.website": 1},
-        ):
-            prof = a.get("profile") or {}
-            profiles[a["handle"]] = {
-                "name": prof.get("name"),
-                "website": prof.get("website"),
-            }
+    if not leader:
+        done.wait(timeout=120)
+        cached = _drafts_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        # Leader failed or timed out — fall through and try ourselves.
 
-    events = event_extract.extract_events(
-        posts,
-        min_score=min_score,
-        profiles=profiles,
-        use_llm=use_llm,
-        ocr_allow_fetch=ocr_fetch,
-    )
+    try:
+        query: dict[str, Any] = {}
+        if handle_key:
+            query["handle"] = handle_key
 
-    # Persist fresh DeepSeek titles onto posts so later loads stay fast.
-    ops = []
-    from pymongo import UpdateOne
+        posts = list(
+            db[settings.COL_POSTS]
+            .find(query, _EVENT_POST_PROJECTION)
+            .sort([("postedAt", -1)])
+            .limit(_EVENT_POST_LIMIT)
+        )
+        handles = list({(p.get("handle") or "").lower() for p in posts if p.get("handle")})
+        profiles: dict[str, dict[str, Any]] = {}
+        if handles:
+            for a in db[settings.COL_ACCOUNTS].find(
+                {"handle": {"$in": handles}},
+                {"handle": 1, "profile.name": 1, "profile.website": 1},
+            ):
+                prof = a.get("profile") or {}
+                profiles[a["handle"]] = {
+                    "name": prof.get("name"),
+                    "website": prof.get("website"),
+                }
 
-    for event in events:
-        persist = event.pop("_llmPersist", None)
-        if not persist:
-            continue
-        post_id = event.get("postId") or (event.get("id") or "").removeprefix("ig:")
-        if not post_id:
-            continue
-        ops.append(UpdateOne({"_id": post_id}, {"$set": persist}))
-    if ops:
-        try:
-            db[settings.COL_POSTS].bulk_write(ops, ordered=False)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("llm persist failed: %s", exc)
+        events = event_extract.extract_events(
+            posts,
+            min_score=min_score,
+            profiles=profiles,
+            use_llm=use_llm,
+            ocr_allow_fetch=ocr_fetch,
+        )
 
-    _drafts_cache.set(cache_key, (events, profiles))
-    return events, profiles
+        # Persist fresh DeepSeek titles onto posts so later loads stay fast.
+        ops = []
+        from pymongo import UpdateOne
+
+        for event in events:
+            persist = event.pop("_llmPersist", None)
+            if not persist:
+                continue
+            post_id = event.get("postId") or (event.get("id") or "").removeprefix("ig:")
+            if not post_id:
+                continue
+            ops.append(UpdateOne({"_id": post_id}, {"$set": persist}))
+        if ops:
+            try:
+                db[settings.COL_POSTS].bulk_write(ops, ordered=False)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("llm persist failed: %s", exc)
+
+        result = (events, profiles)
+        _drafts_cache.set(cache_key, result)
+        return result
+    finally:
+        if leader and done is not None:
+            with _drafts_inflight_lock:
+                _drafts_inflight.pop(cache_key, None)
+            done.set()
 
 
 def _clean(doc: dict[str, Any], *, drop_raw: bool = True) -> dict[str, Any]:
@@ -763,10 +786,10 @@ def list_events(
     limit: int = Query(50, ge=1, le=200),
     skip: int = Query(0, ge=0),
     llm: bool | None = Query(
-        None,
+        False,
         description=(
-            "DeepSeek primary titles. Default on when DEEPSEEK_API_KEY is set; "
-            "results are stored on posts so later loads reuse llmName."
+            "DeepSeek primary titles (slow). Default off for dashboard reads; "
+            "uses stored llmName when present. Pass true to refine live."
         ),
     ),
     ocr_fetch: bool = Query(
@@ -798,7 +821,7 @@ def list_events(
 
     llm_meta = {
         "enabled": bool(settings.DEEPSEEK_ENABLED and settings.DEEPSEEK_API_KEY),
-        "requested": llm if llm is not None else bool(settings.DEEPSEEK_ENABLED and settings.DEEPSEEK_API_KEY),
+        "requested": bool(llm),
         "ocrFetch": ocr_fetch,
         "model": settings.DEEPSEEK_MODEL if settings.DEEPSEEK_API_KEY else None,
         "refined": sum(1 for e in events if e.get("nameSource") == "deepseek"),

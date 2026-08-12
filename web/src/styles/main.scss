@@ -322,17 +322,17 @@ a {
   }
 
   &__value {
-    font-family: $font;
-    font-size: $fs-2xl;
+    font-family: $font-ui;
+    font-size: $fs-lg;
     font-variant-numeric: tabular-nums;
     font-weight: 600;
-    letter-spacing: -0.03em;
-    line-height: 1.15;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
     margin-top: 2px;
     overflow-wrap: anywhere;
 
     @include below($bp-sm) {
-      font-size: $fs-xl;
+      font-size: $fs-md;
     }
 
     &--warn {
