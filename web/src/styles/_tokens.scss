@@ -1,30 +1,30 @@
-// Design tokens
+// Design tokens — dark theme
 
-$bg:            #f4f1ec;
-$bg-raised:     #fffdf9;
-$bg-inset:      #e8e3db;
-$border:        #d9d2c6;
-$border-strong: #b7ae9f;
+$bg:            #0f1115;
+$bg-raised:     #171b22;
+$bg-inset:      #0a0c10;
+$border:        #2a303b;
+$border-strong: #3d4654;
 
-$text:          #1c1915;
-$text-muted:    #5c564c;
-$text-faint:    #8a8276;
+$text:          #e8e6e1;
+$text-muted:    #9a958c;
+$text-faint:    #6e6a63;
 
-$accent:        #0f6e56;
-$accent-dim:    rgba(15, 110, 86, 0.12);
+$accent:        #3dba8f;
+$accent-dim:    rgba(61, 186, 143, 0.18);
 
-$tier-hot:      #0f6e56;
-$tier-warm:     #1d6fb8;
-$tier-cold:     #b86a1d;
-$tier-dormant:  #7a746a;
+$tier-hot:      #3fb950;
+$tier-warm:     #58a6ff;
+$tier-cold:     #d29922;
+$tier-dormant:  #8b919a;
 
-$ok:            #0f6e56;
-$warn:          #b86a1d;
-$danger:        #b42318;
+$ok:            #3fb950;
+$warn:          #d29922;
+$danger:        #f85149;
 
-$source-graph:    #0f6e56;
-$source-web:      #b86a1d;
-$source-embed:    #5b4db8;
+$source-graph:    #3fb950;
+$source-web:      #d29922;
+$source-embed:    #a78bfa;
 
 $s-1: 4px;
 $s-2: 8px;

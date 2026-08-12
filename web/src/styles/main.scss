@@ -7,6 +7,10 @@
   box-sizing: border-box;
 }
 
+html {
+  color-scheme: dark;
+}
+
 html,
 body,
 #root {
@@ -16,8 +20,9 @@ body,
 body {
   margin: 0;
   background:
-    radial-gradient(1200px 600px at 10% -10%, rgba(15, 110, 86, 0.08), transparent 60%),
-    linear-gradient(180deg, #f7f4ef 0%, $bg 40%);
+    radial-gradient(1100px 520px at 12% -12%, rgba(61, 186, 143, 0.1), transparent 55%),
+    radial-gradient(900px 480px at 90% 0%, rgba(88, 166, 255, 0.05), transparent 50%),
+    linear-gradient(180deg, #141820 0%, $bg 42%);
   color: $text;
   font-family: $font-ui;
   font-size: $fs-md;
@@ -213,25 +218,25 @@ a {
 
   @each $name, $color in $tier-colors {
     &--#{$name} {
-      background: rgba($color, 0.12);
+      background: rgba($color, 0.16);
       color: $color;
     }
   }
 
   @each $name, $color in $source-colors {
     &--#{$name} {
-      background: rgba($color, 0.12);
+      background: rgba($color, 0.16);
       color: $color;
     }
   }
 
   &--danger {
-    background: rgba($danger, 0.12);
+    background: rgba($danger, 0.16);
     color: $danger;
   }
 
   &--muted {
-    background: rgba($text-muted, 0.12);
+    background: rgba($text-muted, 0.16);
     color: $text-muted;
   }
 }
@@ -289,7 +294,8 @@ a {
   &--primary {
     background: $accent;
     border-color: $accent;
-    color: #fff;
+    color: #0b1210;
+    font-weight: 600;
   }
 }
 
@@ -563,7 +569,7 @@ a {
   }
 
   tbody tr:hover {
-    background: rgba($accent, 0.04);
+    background: rgba($accent, 0.1);
   }
 
   tbody tr:last-child td {
@@ -879,7 +885,7 @@ a {
     width: 100%;
 
     &:hover {
-      background: rgba($accent, 0.04);
+      background: rgba($accent, 0.1);
     }
   }
 
@@ -944,7 +950,7 @@ a {
     width: 100%;
 
     &:hover {
-      background: rgba($accent, 0.04);
+      background: rgba($accent, 0.1);
     }
 
     @include below($bp-sm) {
@@ -1052,8 +1058,8 @@ a {
   white-space: nowrap;
 
   &:hover {
-    background: rgba($accent, 0.04);
-    border-color: rgba($accent, 0.35);
+    background: rgba($accent, 0.1);
+    border-color: rgba($accent, 0.45);
     text-decoration: none;
   }
 
@@ -1200,7 +1206,7 @@ a {
     width: 100%;
 
     &:hover {
-      background: rgba($accent, 0.04);
+      background: rgba($accent, 0.1);
     }
   }
 
