@@ -19,10 +19,7 @@ body,
 
 body {
   margin: 0;
-  background:
-    radial-gradient(1100px 520px at 12% -12%, rgba(61, 186, 143, 0.1), transparent 55%),
-    radial-gradient(900px 480px at 90% 0%, rgba(88, 166, 255, 0.05), transparent 50%),
-    linear-gradient(180deg, #141820 0%, $bg 42%);
+  background: $bg;
   color: $text;
   font-family: $font-ui;
   font-size: $fs-md;
@@ -865,7 +862,7 @@ a {
 }
 
 .menu-profile {
-  background: $bg-raised;
+  background: $bg;
   border: 1px solid $border;
   border-radius: $r-lg;
   overflow: hidden;
@@ -925,7 +922,7 @@ a {
 }
 
 .menu-tray {
-  background: $bg-inset;
+  background: $bg;
   border: 1px solid $border;
   border-radius: $r-md;
   overflow: hidden;
@@ -1045,7 +1042,7 @@ a {
 
 .menu-source {
   align-items: baseline;
-  background: $bg-raised;
+  background: $bg;
   border: 1px solid $border;
   border-radius: $r-sm;
   color: inherit;
@@ -1104,7 +1101,7 @@ a {
   }
 
   &__title {
-    color: $text-faint;
+    color: $text;
     font-family: $font-ui;
     font-size: $fs-xs;
     font-weight: 600;
@@ -1114,20 +1111,20 @@ a {
   }
 
   &__count {
-    color: $text-faint;
+    color: $text-muted;
     font-size: $fs-xs;
     margin-left: auto;
   }
 
   &__chev {
     @include mono;
-    color: $text-faint;
+    color: $text-muted;
     flex-shrink: 0;
     font-size: $fs-xs;
   }
 
   &__items {
-    background: $bg-raised;
+    background: $bg;
     border: 1px solid $border;
     border-radius: $r-md;
     overflow: hidden;

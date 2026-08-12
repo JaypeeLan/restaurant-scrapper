@@ -1,17 +1,17 @@
-// Design tokens — dark theme
+// Design tokens — high-contrast black / white
 
-$bg:            #0f1115;
-$bg-raised:     #171b22;
-$bg-inset:      #0a0c10;
-$border:        #2a303b;
-$border-strong: #3d4654;
+$bg:            #000000;
+$bg-raised:     #0a0a0a;
+$bg-inset:      #000000;
+$border:        #222222;
+$border-strong: #3a3a3a;
 
-$text:          #e8e6e1;
-$text-muted:    #9a958c;
-$text-faint:    #6e6a63;
+$text:          #ffffff;
+$text-muted:    #b3b3b3;
+$text-faint:    #8a8a8a;
 
 $accent:        #3dba8f;
-$accent-dim:    rgba(61, 186, 143, 0.18);
+$accent-dim:    rgba(61, 186, 143, 0.2);
 
 $tier-hot:      #3fb950;
 $tier-warm:     #58a6ff;
