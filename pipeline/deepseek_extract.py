@@ -52,12 +52,18 @@ Return ONLY compact JSON (no markdown) with this shape:
 }
 
 Rules for name (critical):
+- You are the PRIMARY title generator. Prefer a clean brand/show name a guest would recognize.
 - Prefer the on-image flyer/card title when OCR is present and readable.
-- Never use SEO/marketing openers, @mentions, or long sentences as the name.
+- Ignore OCR garbage (random punctuation, truncated words, "Londona|~", "Showing Today").
+- Never use SEO/marketing openers or slogans as the name ("THE CITY HAS A NEW SPEED LIMIT",
+  "Critics have spoken", "LONDON ARE YOU READY").
+- Prefer named nights and shows in the caption when clear: "Ferrari Friday",
+  "Dear Kaffy: Diary of a Single Woman", "Mi Casa Es Tu Casa", "YumCha", "Teppanyaki".
 - Never use CTA/venue/status text: "Scan Here", "Last Show", "Get Your Ticket",
   "The Shaw Theatre" alone, production-company lines, phone numbers, prices.
 - Strip suffixes like "Seatings" when the core offering is clear (Teppanyaki Seatings → Teppanyaki).
-- Good examples: "Teppanyaki", "Sunday Brunch Affairs", "Dear Kaffy: Diary of a Single Woman".
+- Good examples: "Teppanyaki", "Sunday Brunch Affairs", "Dear Kaffy: Diary of a Single Woman",
+  "Ferrari Friday".
 
 Other rules:
 - categories must be from: Food, Drinks, Dance, Rave, Art, Games, Music, Movies, Theater,
@@ -216,6 +222,14 @@ def extract_experience_fields(
     if not enabled():
         return None
 
+    # Mongo-persisted refine (survives Render ephemeral disk).
+    stored = post.get("llmExtract")
+    if use_cache and isinstance(stored, dict) and stored.get("name"):
+        out = dict(stored)
+        out["_cached"] = True
+        out["_model"] = post.get("llmModel") or settings.DEEPSEEK_MODEL
+        return out
+
     handle = (post.get("handle") or "").lower()
     post_id = str(post.get("_id") or post.get("id") or "")
     caption = (post.get("caption") or "").strip()
@@ -236,6 +250,15 @@ def extract_experience_fields(
             return cached
 
     if not allow_network:
+        # Fall back to a previously stored name-only hint.
+        stored_name = (post.get("llmName") or "").strip()
+        if stored_name:
+            return {
+                "isExperience": True,
+                "name": stored_name,
+                "_cached": True,
+                "_model": post.get("llmModel") or settings.DEEPSEEK_MODEL,
+            }
         return None
 
     user = _user_payload(

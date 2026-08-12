@@ -255,6 +255,11 @@ _SCHEDULE_NAME_NOISE = re.compile(
     r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
     re.I,
 )
+_CITY_ONLY_NAME = re.compile(
+    r"^(lagos|london|abuja|nigeria|lekki|vi|ikoyi)"
+    r"(?:\s+(lagos|london|abuja|nigeria|lekki|vi|ikoyi))?$",
+    re.I,
+)
 _HASHTAG_EVENT_SUFFIX = re.compile(
     r"(sunday|monday|tuesday|wednesday|thursday|friday|saturday|"
     r"brunch|night|party|affairs?|festival|session|seatings?|unlimited|"
@@ -294,7 +299,36 @@ def _is_bad_experience_name(name: str) -> bool:
         return True
     if _SCHEDULE_NAME_NOISE.search(cleaned):
         return True
+    if _CITY_ONLY_NAME.match(cleaned):
+        return True
     if _NARRATIVE_NAME.search(cleaned):
+        return True
+    # Marketing slogans / CTAs, not show titles.
+    if re.search(
+        r"\b(has a new|is the destination|pull up|feel the rush|shifting gears|"
+        r"city has|speed limit|redefined|are you ready|book now|get your ticket|"
+        r"don'?t miss|unforgettable experience)\b",
+        cleaned,
+        re.I,
+    ):
+        return True
+    if re.fullmatch(r"destination|countdown|book now|tickets?", cleaned, re.I):
+        return True
+    if re.search(r"\bproduction\b", cleaned, re.I) and not re.search(
+        r"\b(dear\s+kaffy|teppanyaki|brunch|friday)\b", cleaned, re.I
+    ):
+        return True
+    # Person names without offering cues (Bolanle Austen / Bolanle Alt).
+    words = [w for w in cleaned.split() if w.isalpha()]
+    if (
+        2 <= len(words) <= 3
+        and all(w[:1].isupper() and w[1:].islower() for w in words)
+        and not re.search(
+            r"\b(friday|saturday|sunday|brunch|night|kaffy|teppanyaki|yumcha|menu)\b",
+            cleaned,
+            re.I,
+        )
+    ):
         return True
     if cleaned.endswith(":") or cleaned.endswith(","):
         return True
@@ -488,15 +522,10 @@ def _name_from_offering_label(caption: str) -> str | None:
 
 def _experience_name(caption: str) -> str:
     """
-    Caption fallback when card OCR finds nothing usable.
+    Caption fallback when card OCR / DeepSeek find nothing usable.
 
-    Prefer a real show/offering label. Never use long SEO openers as the name.
+    Prefer branded nights and offerings over SEO all-caps slogans.
     """
-    # Hero ALL-CAPS flyer lines beat weak "Word Friday" date glues.
-    from_caps = _name_from_all_caps_line(caption)
-    if from_caps:
-        return from_caps
-
     from_night = _name_from_named_night(caption)
     if from_night:
         return from_night
@@ -504,6 +533,10 @@ def _experience_name(caption: str) -> str:
     from_offer = _name_from_offering_label(caption)
     if from_offer:
         return from_offer
+
+    from_caps = _name_from_all_caps_line(caption)
+    if from_caps:
+        return from_caps
 
     from_as = _name_from_as_clause(caption)
     if from_as:
@@ -811,8 +844,10 @@ def experience_from_post(
     Build a partial ExperienceType draft from one IG post.
 
     The experience gate uses caption + flyer OCR (when available), so a thin
-    caption with a detailed flyer still qualifies. Name priority: DeepSeek
-    (when enabled) → flyer OCR → hashtag → caption.
+    caption with a detailed flyer still qualifies.
+
+    Name priority: DeepSeek (stored ``llmName`` or live) → usable flyer OCR →
+    caption heuristics. Unusable OCR junk never beats the caption.
     """
     caption = (post.get("caption") or "").strip()
     if isinstance(caption, dict):
@@ -824,7 +859,7 @@ def experience_from_post(
     flyer_text = (ocr_text or "").strip()
     card_title = None
 
-    # Flyer-first: prefer titles persisted at ingest (Mongo ocrTitle/ocrText).
+    # Flyer OCR: prefer titles persisted at ingest; only keep usable ones.
     stored_text = (post.get("ocrText") or "").strip()
     stored_title = (post.get("ocrTitle") or "").strip() or None
     if use_card_ocr and ocr_text is None and (stored_text or stored_title):
@@ -857,6 +892,14 @@ def experience_from_post(
         except Exception:  # noqa: BLE001
             card_title = None
 
+    try:
+        from pipeline.ocr import is_usable_ocr_title
+
+        if card_title and not is_usable_ocr_title(card_title):
+            card_title = None
+    except Exception:  # noqa: BLE001
+        card_title = None
+
     gate = extract_from_text(caption)
     gate_source = "caption"
     if flyer_text:
@@ -872,8 +915,38 @@ def experience_from_post(
         return None
 
     body = f"{caption}\n{flyer_text}".strip() if flyer_text else caption
-    name = card_title or gate["title"]
+    caption_name = gate["title"]
+
+    # If caption has a strong brand (Ferrari Friday / Dear Kaffy) and the card
+    # title doesn't agree, trust the caption — OCR amenity/review lines lose.
+    strong = (
+        _name_from_named_night(caption)
+        or _name_from_offering_label(caption)
+        or _name_from_inline_colon_title(caption)
+    )
+    if not strong and re.search(r"dear\s+kaffy|diary of a single woman", caption, re.I):
+        strong = "Dear Kaffy: Diary of a Single Woman"
+    if card_title and strong:
+        card_key = _experience_name_key(card_title)
+        strong_key = _experience_name_key(strong)
+        if card_key != strong_key and strong_key not in card_key and card_key not in strong_key:
+            card_title = None
+
+    # Fallback stack: usable card OCR → caption heuristics.
+    # DeepSeek (stored or live) overrides below when available — it is primary.
+    name = card_title or caption_name
     name_source = "card" if card_title else "caption"
+    if strong and (not card_title) and _is_usable_experience_name(strong):
+        # Prefer the strong caption brand over a weak SEO/all-caps gate title.
+        if _experience_name_key(caption_name) != _experience_name_key(strong):
+            if _is_bad_experience_name(caption_name) or len(strong) <= len(caption_name) + 10:
+                name = strong
+                name_source = "caption"
+
+    stored_llm_name = (post.get("llmName") or "").strip() or None
+    if stored_llm_name and _is_usable_experience_name(stored_llm_name):
+        name = stored_llm_name
+        name_source = "deepseek"
     tags = _HASHTAG_RE.findall(caption)
     mentions = [m for m in _MENTION_RE.findall(caption) if m.lower() != handle]
     urls = _URL_RE.findall(caption) or _URL_RE.findall(flyer_text)
@@ -961,7 +1034,7 @@ def experience_from_post(
 
             llm = deepseek_extract.extract_experience_fields(
                 post,
-                heuristic_name=name,
+                heuristic_name=caption_name,
                 profile_name=profile_name,
                 allow_network=llm_allow_network,
                 ocr_text=flyer_text,
@@ -977,8 +1050,26 @@ def experience_from_post(
                 missing2.extend(k for k in _NEEDS_PRODUCT if _is_empty(exp2.get(k)))
                 draft["filled"] = [k for k in _FILLABLE if k not in missing2]
                 draft["missing"] = missing2
+                draft["llm"] = {
+                    "model": llm.get("_model") or settings.DEEPSEEK_MODEL,
+                    "cached": bool(llm.get("_cached")),
+                }
+                if not llm.get("_cached") or not post.get("llmName"):
+                    from datetime import datetime, timezone
+
+                    draft["_llmPersist"] = {
+                        "llmName": (draft.get("title") or "").strip() or None,
+                        "llmExtract": {
+                            k: v
+                            for k, v in llm.items()
+                            if not str(k).startswith("_")
+                        },
+                        "llmModel": llm.get("_model") or settings.DEEPSEEK_MODEL,
+                        "llmAt": datetime.now(timezone.utc),
+                        "llmStatus": "ok",
+                    }
         except Exception:  # noqa: BLE001 — LLM is best-effort
-            pass
+            draft["llm"] = {"error": "refine_failed"}
 
     final_name = ((draft.get("experience") or {}).get("name") or draft.get("title") or "")
     if not _is_usable_experience_name(final_name):
@@ -1061,6 +1152,8 @@ def _experience_name_key(name: str) -> str:
     """
     s = (name or "").lower().strip()
     s = re.sub(r"['’]", "", s)
+    if re.search(r"dear\s+kaffy|diary of a single woman", s):
+        return "dear-kaffy"
     s = s.split(":")[0].strip()
     s = re.sub(
         r"\s+(london|lagos|abuja|nigeria|pretoria|edition|live|show)\s*$",
@@ -1075,9 +1168,15 @@ def _experience_name_key(name: str) -> str:
 def _event_cluster_key(event: dict[str, Any]) -> tuple[str, str]:
     """Handle + normalized name; re-parse caption when the label is Untitled."""
     handle = (event.get("handle") or "").lower()
+    caption = event.get("caption") or ""
+    permalink = event.get("permalink") or ""
+    blob = f"{caption}\n{permalink}"
+    # Same touring show across many promo posts.
+    if re.search(r"dear\s*[- ]?\s*kaffy|diary of a single woman", blob, re.I):
+        return (handle, "dear-kaffy")
     name = ((event.get("experience") or {}).get("name") or event.get("title") or "").strip()
     if not name or name.lower() in ("untitled", "experience"):
-        name = _experience_name(event.get("caption") or "")
+        name = _experience_name(caption)
     return (handle, _experience_name_key(name))
 
 

@@ -600,6 +600,29 @@ The Details:
             (stored.get("experience") or {}).get("name"),
         )
         check("nameSource is card", stored.get("nameSource") == "card", stored.get("nameSource"))
+
+    check(
+        "ocr junk rejected",
+        not ocr_mod.is_usable_ocr_title("Londona|~"),
+    )
+    check(
+        "ocr junk showing-today rejected",
+        not ocr_mod.is_usable_ocr_title(") Showing Today §"),
+    )
+    check(
+        "ocr amenity line rejected",
+        not ocr_mod.is_usable_ocr_title("Top Dj All Night « Live Sax Performance"),
+    )
+    slogan = (
+        "THE CITY HAS A NEW SPEED LIMIT.\n"
+        "Ferrari Friday at RedBar Lagos, where luxury meets late nights.\n"
+        "August 7. 9PM till dawn."
+    )
+    check(
+        "ferrari beats speed-limit slogan",
+        event_extract._experience_name(slogan).lower() == "ferrari friday",
+        event_extract._experience_name(slogan),
+    )
     ferrari_draft = event_extract.experience_from_post(
         {
             "_id": "redbar:ferrari",

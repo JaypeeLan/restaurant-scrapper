@@ -67,6 +67,57 @@ _BARE_DAY = re.compile(
     r"^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$",
     re.I,
 )
+_OCR_JUNK_CHARS = re.compile(r"[|\\/~`^<>§«»]|_{2,}|\.{3,}")
+_OCR_LETTER = re.compile(r"[A-Za-z]")
+_OCR_AMENITY_LINE = re.compile(
+    r"\b(top\s+dj|live\s+sax|premium\s+bottle|waterside\s+luxury|"
+    r"hypeman|saxophonist|bottle\s+service)\b",
+    re.I,
+)
+_OCR_REVIEWISH = re.compile(
+    r"^(critics|review)|[“\"]|(\bis a riot\b|\briver of tears\b|\bhave spoken\b)",
+    re.I,
+)
+
+
+def is_usable_ocr_title(title: str | None) -> bool:
+    """
+    True when a flyer OCR title is safe to use as the experience name.
+
+    Rejects punctuation garbage (Londona|~, Py —\\S _), amenity stacks, and
+    review-quote fragments.
+    """
+    cleaned = re.sub(r"\s+", " ", (title or "")).strip(" \t\"'“”‘’")
+    if not cleaned or len(cleaned) < 4 or len(cleaned) > 72:
+        return False
+    letters = _OCR_LETTER.findall(cleaned)
+    if len(letters) < 4:
+        return False
+    alpha_ratio = len(letters) / max(len(cleaned.replace(" ", "")), 1)
+    if alpha_ratio < 0.55:
+        return False
+    if _OCR_JUNK_CHARS.search(cleaned):
+        return False
+    if _OCR_AMENITY_LINE.search(cleaned):
+        return False
+    if _OCR_REVIEWISH.search(title or "") or _OCR_REVIEWISH.search(cleaned):
+        return False
+    if re.match(r"^[\W§]+", cleaned) or re.search(r"[\W§]{2,}$", cleaned):
+        return False
+    words = [w for w in cleaned.split() if w.isalpha()]
+    if (
+        len(words) == 2
+        and all(w[:1].isupper() and w[1:].islower() for w in words)
+        and not _EVENTISH.search(cleaned)
+        and not _OFFERING_CORE.search(cleaned)
+    ):
+        return False
+    if _BARE_DAY.match(cleaned):
+        return False
+    # Production-company leftovers.
+    if re.search(r"\bproduction\b", cleaned, re.I):
+        return False
+    return True
 
 
 def _cache_path(key: str) -> Path:
@@ -399,7 +450,10 @@ def title_from_ocr(text: str, *, caption: str | None = None) -> str | None:
         best = best.title()
     best = _correct_title_with_caption(best, caption)
     best = _prefer_emdash_brand(best)
-    return _normalize_experience_name(best)
+    normalized = _normalize_experience_name(best)
+    if not is_usable_ocr_title(normalized):
+        return None
+    return normalized
 
 
 def card_title_for_post(post: dict[str, Any]) -> str | None:
@@ -478,6 +532,8 @@ def run_ocr_fields(post: dict[str, Any], *, allow_fetch: bool = True) -> dict[st
     if isinstance(caption, dict):
         caption = caption.get("text") or ""
     title = title_from_ocr(text, caption=caption) if text else None
+    if title and not is_usable_ocr_title(title):
+        title = None
     return {
         "ocrText": text,
         "ocrTitle": title,

@@ -1,10 +1,11 @@
 """
-Read-only API over the ingest collections.
+Read API over the ingest collections (plus optional DeepSeek title persistence).
 
     uvicorn serve:app --reload --port 8000
 
-Read-only on purpose: this exists to look at what the pipeline collected, not
-to trigger it. Nothing here writes, so it's safe to expose to a dashboard.
+Primarily read-only for the dashboard. When DeepSeek refines an experience name
+it may ``$set`` ``llmName`` / ``llmExtract`` on the source post so later loads
+stay fast.
 
 Mirrors the FastAPI conventions in validds/scraper/serve.py.
 """
@@ -169,15 +170,20 @@ def _experience_drafts(
     *,
     handle: str | None = None,
     min_score: int = 2,
-    use_llm: bool = False,
+    use_llm: bool | None = None,
     ocr_fetch: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     """
     Shared experience extraction for summary + /api/events.
 
-    Uses flyer titles stored on posts at ingest (``ocrTitle`` / ``ocrText``).
-    Live CDN OCR is off by default (``ocr_fetch=false``) so the dashboard stays fast.
+    DeepSeek is the primary namer when configured (results persisted on posts as
+    ``llmName``). Usable flyer OCR beats caption; junk OCR does not.
     """
+    from pipeline import deepseek_extract
+
+    if use_llm is None:
+        use_llm = deepseek_extract.enabled()
+
     query: dict[str, Any] = {}
     if handle:
         query["handle"] = handle.strip().lstrip("@").lower()
@@ -208,6 +214,25 @@ def _experience_drafts(
         use_llm=use_llm,
         ocr_allow_fetch=ocr_fetch,
     )
+
+    # Persist fresh DeepSeek titles onto posts so later loads stay fast.
+    ops = []
+    from pymongo import UpdateOne
+
+    for event in events:
+        persist = event.pop("_llmPersist", None)
+        if not persist:
+            continue
+        post_id = event.get("postId") or (event.get("id") or "").removeprefix("ig:")
+        if not post_id:
+            continue
+        ops.append(UpdateOne({"_id": post_id}, {"$set": persist}))
+    if ops:
+        try:
+            db[settings.COL_POSTS].bulk_write(ops, ordered=False)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("llm persist failed: %s", exc)
+
     return events, profiles
 
 
@@ -261,7 +286,7 @@ def summary() -> dict[str, Any]:
     day_ago = _now() - timedelta(days=1)
     week_ago = _now() - timedelta(days=7)
 
-    events, _profiles = _experience_drafts(db)
+    events, _profiles = _experience_drafts(db, use_llm=False)
 
     return {
         "accounts": accounts.count_documents({}),
@@ -595,22 +620,22 @@ def list_events(
     grouped: bool = Query(True, description="group by handle"),
     limit: int = Query(50, ge=1, le=200),
     skip: int = Query(0, ge=0),
-    llm: bool = Query(
-        False,
-        description="Refine with DeepSeek (off by default — slow on cold cache)",
+    llm: bool | None = Query(
+        None,
+        description=(
+            "DeepSeek primary titles. Default on when DEEPSEEK_API_KEY is set; "
+            "results are stored on posts so later loads reuse llmName."
+        ),
     ),
     ocr_fetch: bool = Query(
         False,
-        description="Download + OCR image flyers live (off by default; uses disk cache only)",
+        description="Download + OCR image flyers live (off by default; uses stored ocrText)",
     ),
 ) -> dict[str, Any]:
     """
-    Experience drafts from captions, shaped like the main product ExperienceType.
+    Experience drafts from captions / flyer OCR / DeepSeek, shaped like ExperienceType.
 
-    Derived on read from `ig_posts_raw`. Incomplete fields listed per item under
-    `missing`. Live OCR/DeepSeek are opt-in so the dashboard stays responsive;
-    cached OCR/LLM results are still applied when present under `.cache/`.
-
+    Name priority: stored/live DeepSeek → usable flyer OCR → caption heuristics.
     Paginated: `limit`/`skip` apply to profile groups when `grouped=true`, else
     to flat experience items. `total` is profile groups (grouped) or experience
     drafts (flat). `experienceTotal` is always the full deduped experience count.
@@ -631,7 +656,7 @@ def list_events(
 
     llm_meta = {
         "enabled": bool(settings.DEEPSEEK_ENABLED and settings.DEEPSEEK_API_KEY),
-        "requested": llm,
+        "requested": llm if llm is not None else bool(settings.DEEPSEEK_ENABLED and settings.DEEPSEEK_API_KEY),
         "ocrFetch": ocr_fetch,
         "model": settings.DEEPSEEK_MODEL if settings.DEEPSEEK_API_KEY else None,
         "refined": sum(1 for e in events if e.get("nameSource") == "deepseek"),
