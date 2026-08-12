@@ -186,11 +186,24 @@ def profile_from_graph(discovery: dict[str, Any], *, handle: str) -> dict[str, A
 
 
 def profile_from_web(user: dict[str, Any], *, handle: str) -> dict[str, Any]:
-    website = user.get("external_url")
-    if not website:
-        links = user.get("bio_links") or []
-        if links and isinstance(links[0], dict):
-            website = links[0].get("url")
+    bio_links: list[dict[str, str | None]] = []
+    seen_urls: set[str] = set()
+    external = (user.get("external_url") or "").strip() or None
+    if external:
+        bio_links.append({"url": external, "title": None})
+        seen_urls.add(external.rstrip("/").lower())
+    for row in user.get("bio_links") or []:
+        if not isinstance(row, dict):
+            continue
+        url = (row.get("url") or "").strip()
+        if not url or url.rstrip("/").lower() in seen_urls:
+            continue
+        seen_urls.add(url.rstrip("/").lower())
+        bio_links.append({"url": url, "title": row.get("title")})
+
+    website = external
+    if not website and bio_links:
+        website = bio_links[0]["url"]
 
     followers = (user.get("edge_followed_by") or {}).get("count")
     if followers is None:
@@ -206,6 +219,7 @@ def profile_from_web(user: dict[str, Any], *, handle: str) -> dict[str, Any]:
         "name": user.get("full_name"),
         "biography": user.get("biography"),
         "website": website,
+        "bioLinks": bio_links,
         "followers": followers,
         "mediaCount": media_count,
         "profilePicUrl": user.get("profile_pic_url_hd") or user.get("profile_pic_url"),

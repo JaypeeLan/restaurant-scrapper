@@ -332,6 +332,36 @@ def cmd_backfill_menus(args: argparse.Namespace) -> int:
     return 0 if errors == 0 else 1
 
 
+def cmd_backfill_web_menus(args: argparse.Namespace) -> int:
+    """Discover menus from Linktree / restaurant websites → MenuType drafts."""
+    from pipeline import web_menu
+
+    db = store.get_db()
+    stats = web_menu.backfill_web_menus(
+        db,
+        limit=args.limit,
+        handle=args.handle,
+        force=args.force,
+        dry_run=args.dry_run,
+        every_days=args.every_days,
+    )
+    print(
+        f"web menus accounts={stats['accounts']} sources={stats['sources']} "
+        f"updated={stats['updated']} ok={stats['ok']} empty={stats['empty']} "
+        f"error={stats['error']} skipped={stats['skipped']}"
+        + (" (dry-run)" if args.dry_run else "")
+    )
+    store.record_run(
+        db,
+        {
+            "kind": "web_menu_backfill",
+            "dryRun": bool(args.dry_run),
+            **stats,
+        },
+    )
+    return 0 if stats.get("error", 0) == 0 or stats.get("ok", 0) > 0 else 1
+
+
 def cmd_search_handles(args: argparse.Namespace) -> int:
     """Logged-in topsearch → candidate handles (optionally seed ig_accounts)."""
     from ig import logged_in_search
@@ -655,6 +685,27 @@ def main() -> int:
     )
     p_menu.add_argument("--show", action="store_true", help="print sample items")
     p_menu.set_defaults(func=cmd_backfill_menus)
+
+    p_web = sub.add_parser(
+        "backfill-web-menus",
+        help="Linktree / website PDFs & menu pages → MenuType drafts",
+    )
+    p_web.add_argument(
+        "--limit",
+        type=int,
+        default=settings.WEB_MENU_BACKFILL_LIMIT,
+        help="max menu sources this run",
+    )
+    p_web.add_argument("--handle", help="only this @handle")
+    p_web.add_argument(
+        "--every-days",
+        type=int,
+        default=settings.WEB_MENU_EVERY_DAYS,
+        help="re-fetch sources older than this many days",
+    )
+    p_web.add_argument("--force", action="store_true")
+    p_web.add_argument("--dry-run", action="store_true")
+    p_web.set_defaults(func=cmd_backfill_web_menus)
 
     p_sch = sub.add_parser("schedule", help="run continuously")
     p_sch.add_argument(

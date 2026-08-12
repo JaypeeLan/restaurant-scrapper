@@ -156,6 +156,8 @@ DISCOVER_CRON_MINUTE: int = _int("DISCOVER_CRON_MINUTE", 15)
 # Menu highlight slides → OCR → MenuType. Menus change rarely — weekly is enough.
 MENU_EVERY_DAYS: int = _int("MENU_EVERY_DAYS", 7)
 MENU_BACKFILL_LIMIT: int = _int("MENU_BACKFILL_LIMIT", 40)
+WEB_MENU_EVERY_DAYS: int = _int("WEB_MENU_EVERY_DAYS", 7)
+WEB_MENU_BACKFILL_LIMIT: int = _int("WEB_MENU_BACKFILL_LIMIT", 20)
 # Cron expression for UI / docs (Render `ig-menu-cron` should match).
 MENU_CRON: str = _str("MENU_CRON", "30 3 * * 0")  # Sundays 03:30 UTC
 

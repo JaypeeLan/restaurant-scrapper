@@ -63,7 +63,7 @@ services:
     branch: main
     schedule: "30 3 * * 0"
     buildCommand: bash scripts/build_cron.sh
-    startCommand: python main.py backfill-menus --limit 40
+    startCommand: python main.py backfill-menus --limit 40 && python main.py backfill-web-menus --limit 20
     envVars:
       - fromGroup: ig-ingest-env
 
@@ -125,6 +125,8 @@ envVarGroups:
         value: "30 3 * * 0"
       - key: LLM_BACKFILL_LIMIT
         value: "25"
+      - key: WEB_MENU_BACKFILL_LIMIT
+        value: "20"
       - key: LOG_LEVEL
         value: INFO
       - key: IG_FALLBACK_MAX_PER_RUN

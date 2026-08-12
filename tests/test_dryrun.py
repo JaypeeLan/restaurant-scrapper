@@ -144,6 +144,7 @@ def test_polaris_normalization() -> None:
 
     check("followers from follower_count", profile["followers"] == 8421)
     check("website from bio_links", profile["website"] == "https://testbistro.com")
+    check("bioLinks stored", profile.get("bioLinks") == [{"url": "https://testbistro.com", "title": None}])
     check("timeline edges from polaris connection", len(nodes) == 1)
     check("shortcode from code", doc["shortcode"] == "DEiyb48AeB9", str(doc["shortcode"]))
     check("caption from caption.text", "Taco Tuesday" in doc["caption"])

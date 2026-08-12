@@ -919,6 +919,11 @@ a {
   border-radius: $r-md;
   overflow: hidden;
 
+  &__header {
+    display: flex;
+    flex-direction: column;
+  }
+
   &__head {
     align-items: center;
     background: transparent;
@@ -970,6 +975,27 @@ a {
     }
   }
 
+  &__sources {
+    border-top: 1px solid $border;
+    display: flex;
+    flex-direction: column;
+    gap: $s-2;
+    padding: $s-2 $s-4 $s-3;
+
+    @include below($bp-sm) {
+      padding: $s-2 $s-3 $s-3;
+    }
+  }
+
+  &__sources-label {
+    color: $text-faint;
+    font-family: $font-ui;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
   &__chev {
     @include mono;
     color: $text-faint;
@@ -988,14 +1014,55 @@ a {
     }
   }
 
-  &__link {
-    font-size: $fs-xs;
-  }
-
   &__empty {
     color: $text-faint;
     font-size: $fs-sm;
     margin: 0;
+  }
+}
+
+.menu-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: $s-2;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.menu-source {
+  align-items: baseline;
+  background: $bg-raised;
+  border: 1px solid $border;
+  border-radius: $r-sm;
+  color: inherit;
+  display: flex;
+  flex-wrap: wrap;
+  gap: $s-2;
+  padding: $s-2 $s-3;
+  text-decoration: none;
+  transition: border-color 0.12s ease, background 0.12s ease;
+
+  &:hover {
+    background: rgba($accent, 0.04);
+    border-color: rgba($accent, 0.35);
+    text-decoration: none;
+  }
+
+  &__type {
+    color: $accent;
+    flex-shrink: 0;
+    font-family: $font-ui;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  &__label {
+    color: $text-muted;
+    font-size: $fs-xs;
+    overflow-wrap: anywhere;
   }
 }
 

@@ -21,6 +21,87 @@ function groupBySection(items: MenuItem[]): { section: string; items: MenuItem[]
   return [...map.entries()].map(([section, rows]) => ({ section, items: rows }));
 }
 
+interface MenuSourceLinkView {
+  type: string;
+  label: string;
+  href: string;
+}
+
+function menuSources(item: Highlight): MenuSourceLinkView[] {
+  if (item.sources?.length) {
+    return item.sources.map((s) => ({
+      type: s.type,
+      label: s.label,
+      href: s.href,
+    }));
+  }
+
+  const out: MenuSourceLinkView[] = [];
+  const isWeb = item.sourceType === 'web';
+
+  if (isWeb) {
+    if (item.menuUrl) {
+      const isPdf = item.menuUrl.toLowerCase().includes('.pdf');
+      out.push({
+        type: item.webSource === 'linktree' ? 'Linktree' : 'Website',
+        label: isPdf ? `${item.title?.trim() || 'Menu'} · PDF` : item.title?.trim() || 'Menu page',
+        href: item.menuUrl,
+      });
+    }
+    if (item.sourceUrl && item.sourceUrl !== item.menuUrl) {
+      out.push({
+        type: 'Bio link',
+        label: hostLabel(item.sourceUrl),
+        href: item.sourceUrl,
+      });
+    }
+    return out;
+  }
+
+  if (item.permalink) {
+    out.push({
+      type: 'Instagram',
+      label: item.title?.trim() || 'Highlight tray',
+      href: item.permalink,
+    });
+  }
+  return out;
+}
+
+function hostLabel(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+function MenuTraySources({ sources }: { sources: MenuSourceLinkView[] }) {
+  if (sources.length === 0) return null;
+
+  return (
+    <div className="menu-tray__sources">
+      <span className="menu-tray__sources-label">Source{sources.length === 1 ? '' : 's'}</span>
+      <ul className="menu-source-list">
+        {sources.map((src) => (
+          <li key={src.href}>
+            <a
+              className="menu-source"
+              href={src.href}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="menu-source__type">{src.type}</span>
+              <span className="menu-source__label">{src.label}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function MenuItemRow({ row }: { row: MenuItem }) {
   return (
     <div className="menu-item">
@@ -43,49 +124,44 @@ function HighlightTray({ item }: { item: Highlight }) {
   const count = item.menuItemCount ?? menuItems.length;
   const sections = useMemo(() => groupBySection(menuItems), [menuItems]);
   const title = item.title?.trim() || 'Untitled tray';
+  const sources = useMemo(() => menuSources(item), [item]);
 
   return (
     <article className={`menu-tray${open ? ' menu-tray--open' : ''}`}>
-      <button
-        type="button"
-        className="menu-tray__head"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        <div className="menu-tray__info">
-          <h3 className="menu-tray__title">{title}</h3>
-          <div className="menu-tray__meta">
-            {count > 0 ? (
-              <span className="menu-tray__stat">
-                {count} item{count === 1 ? '' : 's'}
-              </span>
-            ) : (
-              <span className="menu-tray__stat menu-tray__stat--muted">No items yet</span>
-            )}
-            {item.mediaCount != null && item.mediaCount > 0 && (
-              <span className="menu-tray__stat">{item.mediaCount} slides</span>
-            )}
+      <div className="menu-tray__header">
+        <button
+          type="button"
+          className="menu-tray__head"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+        >
+          <div className="menu-tray__info">
+            <h3 className="menu-tray__title">{title}</h3>
+            <div className="menu-tray__meta">
+              {count > 0 ? (
+                <span className="menu-tray__stat">
+                  {count} item{count === 1 ? '' : 's'}
+                </span>
+              ) : (
+                <span className="menu-tray__stat menu-tray__stat--muted">No items yet</span>
+              )}
+              {item.mediaCount != null && item.mediaCount > 0 && item.sourceType !== 'web' && (
+                <span className="menu-tray__stat">{item.mediaCount} slides</span>
+              )}
+            </div>
           </div>
-        </div>
-        <span className="menu-tray__chev" aria-hidden="true">{open ? '▾' : '▸'}</span>
-      </button>
+          <span className="menu-tray__chev" aria-hidden="true">{open ? '▾' : '▸'}</span>
+        </button>
+        <MenuTraySources sources={sources} />
+      </div>
 
       {open && (
         <div className="menu-tray__body">
-          {item.permalink && (
-            <a
-              className="menu-tray__link"
-              href={item.permalink}
-              target="_blank"
-              rel="noreferrer noopener"
-            >
-              View highlight on Instagram
-            </a>
-          )}
           {menuItems.length === 0 ? (
             <p className="menu-tray__empty">
-              Items not extracted yet — tray may be video-only or waiting for the weekly menu
-              backfill.
+              {item.sourceType === 'web'
+                ? 'Menu link found but items not extracted yet — PDF may be image-only or backfill pending.'
+                : 'Items not extracted yet — tray may be video-only or waiting for the weekly menu backfill.'}
             </p>
           ) : (
             sections.map((sec) => (

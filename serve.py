@@ -27,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import settings
 from pipeline import event_extract, store, tiers
+from pipeline.menu_merge import merge_menu_trays
 
 log = logging.getLogger("ig.serve")
 
@@ -238,9 +239,19 @@ _EVENT_POST_PROJECTION = {
 _MENU_HIGHLIGHT_RE = re.compile(
     r"menu|food|drink|beverage|wine|cocktail|kitchen|lunch|dinner|brunch|"
     r"pastr(?:y|ies)|takeaway|take\s*away|how\s+to\s+order|specials?|"
-    r"\bbar\b|dessert|sushi|dim\s*sum",
+    r"\bbar\b|dessert|sushi|dim\s*sum|cigar",
     re.I,
 )
+
+
+def _menu_tray_filter() -> dict[str, Any]:
+    """IG highlight trays + website/Linktree menu sources."""
+    return {
+        "$or": [
+            {"sourceType": "web"},
+            {"title": {"$regex": _MENU_HIGHLIGHT_RE.pattern, "$options": "i"}},
+        ]
+    }
 
 
 def _experience_drafts(
@@ -386,9 +397,7 @@ def summary() -> dict[str, Any]:
         "postsLast24h": posts.count_documents({"firstSeenAt": {"$gte": day_ago}}),
         "postsLast7d": posts.count_documents({"firstSeenAt": {"$gte": week_ago}}),
         "highlights": db[settings.COL_HIGHLIGHTS].count_documents({}),
-        "menus": db[settings.COL_HIGHLIGHTS].count_documents(
-            {"title": {"$regex": _MENU_HIGHLIGHT_RE.pattern, "$options": "i"}}
-        ),
+        "menus": db[settings.COL_HIGHLIGHTS].count_documents(_menu_tray_filter()),
         "menuItems": int(
             (
                 next(
@@ -668,13 +677,11 @@ def list_highlights(
 
     title_clauses: list[dict[str, Any]] = []
     if menus_only:
-        title_clauses.append(
-            {"title": {"$regex": _MENU_HIGHLIGHT_RE.pattern, "$options": "i"}}
-        )
+        title_clauses.append(_menu_tray_filter())
     if q:
         title_clauses.append({"title": {"$regex": re.escape(q), "$options": "i"}})
     if len(title_clauses) == 1:
-        query["title"] = title_clauses[0]["title"]
+        query.update(title_clauses[0])
     elif title_clauses:
         query["$and"] = title_clauses
 
@@ -691,12 +698,15 @@ def list_highlights(
     )
     items = [_clean(doc) for doc in cursor]
     for item in items:
+        is_web = item.get("sourceType") == "web"
         tray_id = item.get("trayId")
-        if tray_id:
+        if is_web:
+            item["permalink"] = item.get("menuUrl") or item.get("sourceUrl")
+        elif tray_id:
             item["permalink"] = f"https://www.instagram.com/stories/highlights/{tray_id}/"
         item["kind"] = (
             "menu"
-            if _MENU_HIGHLIGHT_RE.search(str(item.get("title") or ""))
+            if is_web or _MENU_HIGHLIGHT_RE.search(str(item.get("title") or ""))
             else "highlight"
         )
         items_list = item.get("menuItems")
@@ -725,13 +735,14 @@ def list_highlights(
 
     profiles: list[dict[str, Any]] = []
     for h, trays in by_handle.items():
+        merged_trays = merge_menu_trays(trays)
         profiles.append(
             {
                 "handle": h,
-                "menuCount": sum(1 for t in trays if t.get("kind") == "menu"),
-                "highlightCount": len(trays),
-                "menuItemCount": sum(int(t.get("menuItemCount") or 0) for t in trays),
-                "highlights": trays,
+                "menuCount": sum(1 for t in merged_trays if t.get("kind") == "menu"),
+                "highlightCount": len(merged_trays),
+                "menuItemCount": sum(int(t.get("menuItemCount") or 0) for t in merged_trays),
+                "highlights": merged_trays,
             }
         )
     profiles.sort(

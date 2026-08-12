@@ -296,6 +296,13 @@ export interface MenuItem {
   sourceTrayId?: string;
 }
 
+export interface MenuSourceLink {
+  type: string;
+  label: string;
+  href: string;
+  origin?: 'web' | 'highlight';
+}
+
 export interface Highlight {
   id: string;
   handle: string;
@@ -305,6 +312,12 @@ export interface Highlight {
   mediaCount: number | null;
   permalink?: string;
   kind?: 'menu' | 'highlight';
+  sourceType?: 'web' | 'highlight';
+  webSource?: 'linktree' | 'website' | null;
+  sourceUrl?: string | null;
+  menuUrl?: string | null;
+  sources?: MenuSourceLink[];
+  mergedFrom?: string[];
   menuItems?: MenuItem[];
   menuItemCount?: number;
   menuStatus?: string | null;

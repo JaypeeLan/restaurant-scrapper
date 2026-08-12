@@ -353,6 +353,36 @@ def _call_deepseek(user_content: str) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def extract_menu_from_text(
+    *,
+    handle: str,
+    source_id: str,
+    source_title: str | None,
+    text: str,
+    source_kind: str = "highlight",
+) -> list[dict[str, Any]]:
+    """Run DeepSeek over plain menu text (PDF OCR, website HTML, highlight OCR)."""
+    blob = (text or "").strip()
+    if len(blob) < 40:
+        return []
+
+    if len(blob) > 28000:
+        blob = blob[:28000] + "\n\n[truncated]"
+
+    user = (
+        f"IG handle: @{handle}\n"
+        f"Menu source: {source_kind}\n"
+        f"Menu title: {source_title or '(none)'}\n"
+        f"Source id: {source_id}\n\n"
+        f"MENU TEXT (Nigeria — prices in Naira):\n{blob}"
+    )
+    data = _call_deepseek(user)
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return []
+    return menu_items_from_llm(items, restaurant=handle, tray_id=source_id)
+
+
 def extract_menu_from_ocr(
     *,
     handle: str,
