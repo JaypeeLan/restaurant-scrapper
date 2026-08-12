@@ -81,9 +81,11 @@ Rules:
   hot_beverages, wine, spirits, champagne, beer, others.
 - type is Food or Drink (drinks categories → Drink).
 - section is the on-page heading when present (e.g. "Sushi", "Dim Sum", "Cocktails").
-- price is the numeric amount as printed (no currency symbol). Examples:
-  "N15,000" / "₦22,000" → 15000 / 22000; "€12" / "12" on a Euro menu → 12.
-  Never invent prices. Promo videos naming a cocktail with no price → price null.
+- price is the numeric Naira amount as printed on Nigerian menus (always NGN).
+  Examples: "N15,000" / "₦22,000" / "15k" → 15000; "32" beside a wine name on a
+  Lagos menu usually means ₦32,000 (thousands abbreviated) → 32000.
+  Never use euros or dollars. Never return bare 32 as 32 naira for a priced dish.
+  Never invent prices. Promo slides with no price → price null.
 - Skip headers, phone numbers, addresses, Instagram handles, "scan here", allergens-only lines.
 - Prefer real dish/drink names. Deduplicate near-identical names.
 - Ignore slides that are only marketing slogans / reservation CTAs with no dish list.
@@ -180,6 +182,23 @@ def _parse_price(raw: Any) -> float | int | None:
     return int(price) if price == int(price) else price
 
 
+def _normalize_naira_price(price: float | int | None) -> float | int | None:
+    """
+    Lagos menus quote Naira in thousands; OCR/LLM often drops trailing zeros (32 → 32000).
+    """
+    if price is None:
+        return None
+    p = float(price)
+    if p <= 0:
+        return None
+    if p >= 1000:
+        return int(p) if p == int(p) else p
+    if p <= 300:
+        scaled = p * 1000
+        return int(scaled) if scaled == int(scaled) else scaled
+    return int(p) if p == int(p) else p
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -247,7 +266,7 @@ def menu_items_from_llm(
             str(row.get("type") or "") if row.get("type") is not None else None,
             category,
         )
-        price = _parse_price(row.get("price"))
+        price = _normalize_naira_price(_parse_price(row.get("price")))
         section = re.sub(r"\s+", " ", str(row.get("section") or "")).strip()[:80]
         desc = re.sub(r"\s+", " ", str(row.get("description") or "")).strip()[:400]
         out.append(

@@ -1,18 +1,10 @@
 import { useMemo, useState } from 'react';
 import { api, useDebounced, useFetch } from '../api';
+import { formatNaira } from '../lib/naira';
 import type { Highlight, HighlightProfile, MenuItem } from '../types';
 import { Empty, ErrorState, Loading, Panel } from './Common';
 
 const LIMIT = 200;
-
-function formatPrice(price: number | null | undefined): string {
-  const n = Number(price ?? 0);
-  if (!n) return '—';
-  if (n >= 1000) {
-    return `₦${n.toLocaleString('en-NG')}`;
-  }
-  return String(n);
-}
 
 function formatCategory(category: string): string {
   return category.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -40,7 +32,7 @@ function MenuItemRow({ row }: { row: MenuItem }) {
           <span className="badge badge--muted">{formatCategory(row.category)}</span>
         </div>
       </div>
-      <div className="menu-item__price">{formatPrice(row.price)}</div>
+      <div className="menu-item__price" title="Price (₦)">{formatNaira(row.price)}</div>
     </div>
   );
 }
