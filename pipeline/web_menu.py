@@ -154,15 +154,66 @@ def profile_link_urls(profile: dict[str, Any] | None) -> list[str]:
     return out
 
 
+# Hosts that reject plain HTTP clients regardless of headers. Linktree sits
+# behind fingerprint-based blocking, so every header variant returns 403 while
+# a real browser loads fine. These are worth the cost of driving one.
+_BROWSER_REQUIRED = ("linktr.ee", "linktree.com", "beacons.ai", "bento.me")
+
+
+def _fetch_via_browser(url: str, *, timeout_ms: int = 45_000) -> bytes | None:
+    """Render a page in Chromium and return its HTML."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return None
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page(
+                    user_agent=_USER_AGENT,
+                    viewport={"width": 1280, "height": 900},
+                )
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                page.wait_for_timeout(2_500)
+                return (page.content() or "").encode("utf-8", errors="replace")
+            finally:
+                browser.close()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("[web-menu] browser fetch failed %s: %s", url[:80], exc)
+        return None
+
+
 def _fetch_bytes(url: str, *, timeout: float = 45.0) -> bytes | None:
     try:
         with httpx.Client(
             timeout=timeout,
             follow_redirects=True,
-            headers={"User-Agent": _USER_AGENT},
+            headers={
+                # A bare User-Agent gets 403'd by Linktree and several Lagos
+                # venue sites; they check for the rest of a browser's headers.
+                "User-Agent": _USER_AGENT,
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "application/pdf,*/*;q=0.8"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Upgrade-Insecure-Requests": "1",
+            },
         ) as client:
             resp = client.get(url)
             if resp.status_code >= 400:
+                host = urlparse(url).netloc.lower()
+                if resp.status_code in (403, 429) or any(
+                    h in host for h in _BROWSER_REQUIRED
+                ):
+                    rendered = _fetch_via_browser(url)
+                    if rendered:
+                        log.info("[web-menu] browser fetch recovered %s", url[:80])
+                        return rendered
                 log.warning("[web-menu] HTTP %s for %s", resp.status_code, url[:120])
                 return None
             return resp.content

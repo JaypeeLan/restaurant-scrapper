@@ -101,21 +101,137 @@ def collect_organizers(*, limit: int, detail_cap: int) -> list[dict[str, Any]]:
     return list(by_name.values())
 
 
+_ORG_SYSTEM = """You read Google result snippets about an event organizer and
+write a factual one-paragraph description of them. JSON only.
+
+  description: 2-3 sentences describing what this organizer actually does,
+               built only from the snippets. Null if the snippets do not
+               establish what they are.
+  website:     their own site, or null
+  dateEstablished: "YYYY" or null, only if a snippet states when they started
+  evidence:    the snippet phrases you relied on
+
+The danger is same-name confusion: an organizer called "Chapter" is not the
+publisher, the film, or a business in another country. If the snippets are
+about something else, return nulls. Never invent activities or credentials.
+"""
+
+
+def enrich_organizer(org: dict[str, Any], *, client: Any = None) -> dict[str, Any]:
+    """
+    Fill an organizer's gaps the same way the restaurant mapper does.
+
+    Tix supplies a bio for about two thirds of accounts. For the rest, search
+    plus an LLM is the only route to the required `description`.
+    """
+    from config import settings
+    from discover.places import handle_from_search, harvest_contacts
+    from pipeline import deepseek_extract as ds
+
+    name = (org.get("name") or "").strip()
+    out: dict[str, Any] = {}
+    if not name:
+        return out
+
+    # Instagram handle, same validation the venue path uses.
+    if not org.get("instagram"):
+        handle = handle_from_search(name, city="Lagos", client=client)
+        if handle:
+            out["instagram"] = handle
+
+    # WhatsApp / extra email from their own site, never from search results.
+    if org.get("website"):
+        found = harvest_contacts(org["website"], client=client)
+        if found.get("whatsApp"):
+            out["whatsApp"] = found["whatsApp"]
+        if found.get("emails") and not org.get("email"):
+            out["email"] = found["emails"][0]
+
+    needs_description = not (org.get("bio") or "").strip()
+    if not (needs_description or not org.get("website")):
+        return out
+    if not settings.SERPER_API_KEY or not ds.enabled():
+        return out
+
+    import httpx
+
+    snippets: list[str] = []
+    own = client is None
+    http = client or httpx.Client(timeout=30.0)
+    try:
+        resp = http.post(
+            settings.SERPER_ENDPOINT,
+            headers={
+                "X-API-KEY": settings.SERPER_API_KEY,
+                "Content-Type": "application/json",
+            },
+            json={
+                "q": f"{name} Lagos events organizer OR company",
+                "num": 8,
+                "gl": settings.SERPER_COUNTRY,
+            },
+        )
+        if resp.status_code < 400:
+            for item in (resp.json().get("organic") or []):
+                text = f"{item.get('title','')} — {item.get('snippet','')}".strip(" —")
+                if text:
+                    snippets.append(text[:300])
+    except Exception as exc:  # noqa: BLE001
+        print(f"    organizer serp failed: {exc}", file=sys.stderr)
+    finally:
+        if own and http is not client:
+            http.close()
+    if not snippets:
+        return out
+
+    key = ds._cache_key(
+        handle="organizer-facts", post_id=name,
+        caption=" || ".join(snippets)[:4000], ocr_text="",
+    )
+    cached = ds.read_cached(key)
+    if cached is None:
+        original = ds._SYSTEM
+        try:
+            ds._SYSTEM = _ORG_SYSTEM
+            result = ds._call_api(
+                json.dumps({"organizer": name, "snippets": snippets}, ensure_ascii=False)
+            ) or {}
+        finally:
+            ds._SYSTEM = original
+        cached = {}
+        if isinstance(result.get("description"), str) and len(result["description"]) > 40:
+            cached["description"] = result["description"].strip()[:600]
+        if isinstance(result.get("website"), str) and result["website"].startswith("http"):
+            cached["website"] = result["website"]
+        year = str(result.get("dateEstablished") or "")
+        if re.fullmatch(r"(?:19|20)\d{2}", year):
+            cached["dateEstablished"] = f"{year}-01-01"
+        ds.write_cached(key, cached)
+
+    for field in ("description", "website", "dateEstablished"):
+        if cached.get(field) and not org.get(field if field != "description" else "bio"):
+            out[field] = cached[field]
+    return out
+
+
 def to_organizer_record(
     org: dict[str, Any], *, instagram: str | None = None
 ) -> dict[str, Any]:
     name = (org.get("name") or "").strip() or None
     record = {
         "name": name,
-        "description": org.get("bio"),          # REQUIRED — Tix `bio`
-        "socialMedia": {"ig": instagram, "twitter": None} if instagram else None,
+        # REQUIRED. Tix bio when the account wrote one, otherwise a
+        # search-derived summary. Null only when neither exists.
+        "description": org.get("bio") or org.get("description"),
+        "socialMedia": {"ig": instagram or org.get("instagram"), "twitter": None}
+        if (instagram or org.get("instagram")) else None,
         "emails": [org["email"]] if org.get("email") else None,
         "phones": [org["phone"]] if org.get("phone") else None,
         "website": org.get("website"),
-        "whatsApp": None,                        # no source
-        # Tix `createdAt` is account signup, not when the org was founded —
-        # using it would assert something false.
-        "dateEstablished": None,
+        "whatsApp": org.get("whatsApp"),
+        # Tix `createdAt` is account signup, not when the org was founded, so
+        # it is never used. A stated founding year from search is.
+        "dateEstablished": org.get("dateEstablished"),
         # Not part of addOrganizerValidation — strip before POSTing.
         "sourceRef": {
             "provider": "tix",
@@ -139,6 +255,10 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--no-ig", action="store_true", help="skip website→IG lookup")
     ap.add_argument(
+        "--no-enrich", action="store_true",
+        help="skip search-derived description, contacts and handle lookup",
+    )
+    ap.add_argument(
         "--postable-only", action="store_true",
         help="only sample organizers that already satisfy name+description",
     )
@@ -158,6 +278,17 @@ def main() -> int:
     seed = args.seed if args.seed is not None else random.randrange(1 << 30)
     rng = random.Random(seed)
     sample = rng.sample(pool, min(args.count, len(pool)))
+
+    if not args.no_enrich:
+        import httpx
+
+        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+            filled = 0
+            for org in sample:
+                extra = enrich_organizer(org, client=client)
+                org.update(extra)
+                filled += len(extra)
+        print(f"  enriched: {filled} values across {len(sample)} organizers", file=sys.stderr)
 
     handles: list[str | None] = []
     if args.no_ig:

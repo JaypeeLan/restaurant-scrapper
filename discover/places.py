@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import httpx
 
@@ -167,6 +168,15 @@ _ATMOSPHERE_MASK = (
     "places.parkingOptions,places.priceRange,places.reviews,"
 )
 
+# Google primaryTypes that are not restaurants. Measured over 250 Lagos venues:
+# night_club 0/38 and bar 0/26 carry meal attributes, because they do not serve
+# meals. Importing them as Restaurants is what made `meal` look 43% missing.
+_NON_RESTAURANT_TYPES = {
+    "night_club", "bar", "lounge_bar", "pub", "liquor_store",
+    "meal_delivery", "event_venue", "hotel", "lodging",
+    "association_or_organization", "store", "supermarket",
+}
+
 _ATTR_KEYS = (
     "servesBreakfast", "servesBrunch", "servesLunch", "servesDinner",
     "servesVegetarianFood", "servesCocktails", "servesCoffee", "servesBeer",
@@ -223,6 +233,8 @@ _IG_LINK = re.compile(r"instagram\.com/([A-Za-z0-9._]{2,30})", re.I)
 _IG_RESERVED = {
     "p", "reel", "reels", "explore", "accounts", "tv", "stories", "share",
     "direct", "about", "developer", "legal", "privacy", "terms", "help",
+    # Surfaced by search-result markup rather than by venue pages.
+    "popular", "locations", "web", "login", "signup", "lite", "channel",
 }
 # Site templates ship with an unedited social link; one Lagos venue publishes
 # instagram.com/yourpage. These are never real accounts.
@@ -241,12 +253,25 @@ def _handle_relates(handle: str, *, name: str = "", url: str = "") -> bool:
     or its domain (thehouseng.com → thehouselagos). A template placeholder
     shares nothing with either, which is what makes it detectable.
     """
-    target = re.sub(r"[^a-z0-9]", "", handle.lower())
+    # City and format words are shared by most Lagos venues, so matching on
+    # them is no evidence at all — 'hrclagos' would otherwise validate against
+    # any venue named '<something> Lagos'.
+    generic = (
+        "lagos", "nigeria", "abuja", "restaurant", "lounge", "bar", "cafe",
+        "kitchen", "grill", "the", "eatery", "bistro", "official", "ng",
+    )
+    def _strip(text: str) -> str:
+        text = text.lower()
+        for word in generic:
+            text = text.replace(word, " ")
+        return re.sub(r"[^a-z0-9]", "", text)
+
+    target = _strip(handle)
     if not target:
         return False
-    haystack = re.sub(r"[^a-z0-9]", "", f"{name}{urlparse(url).netloc}".lower())
+    haystack = _strip(f"{name} {urlparse(url).netloc}")
     if not haystack:
-        # Nothing to compare against — don't reject on no evidence.
+        # Nothing distinctive to compare against — don't reject on no evidence.
         return True
     for size in range(len(target), 3, -1):
         for start in range(0, len(target) - size + 1):
@@ -319,6 +344,244 @@ def handle_from_website(
             client.close()
 
 
+_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+# Two shapes in the wild: wa.me/<number> and wa.me/message/<short code>.
+# The short code is a valid contact link even though it carries no digits.
+_WA_HREF = re.compile(r"(?:wa\.me|api\.whatsapp\.com/send\?phone=)/?(\+?\d[\d\s%-]{6,})", re.I)
+_WA_SHORT = re.compile(r"https?://wa\.me/message/([A-Z0-9]{6,})", re.I)
+# Directory placeholders, template dummies, and the addresses of the sites that
+# merely write *about* venues. Harvesting any of these yields a wrong contact.
+_EMAIL_JUNK = re.compile(
+    r"(example|domain\.com|yourname|your-?email|sentry|wixpress|godaddy|"
+    r"unclaimed|noreply|no-reply|dinesurf|eatdrinklagos|tripadvisor|"
+    r"squarespace|wordpress|shopify|sentry\.io)",
+    re.I,
+)
+_CONTACT_PATHS = ("", "/contact", "/contact-us", "/about", "/about-us", "/reservations")
+
+
+def harvest_contacts(
+    website: str,
+    *,
+    client: httpx.Client | None = None,
+    max_pages: int = 3,
+) -> dict[str, Any]:
+    """
+    Emails and WhatsApp numbers from the venue's OWN site.
+
+    Deliberately domain-scoped. Searching the open web for "<venue> email"
+    returns a nearby hotel's address, the directory's `unclaimed@` placeholder,
+    or the review blog's editor — measured, not hypothetical. An address on the
+    venue's own domain is the only one that can be trusted without a human.
+    """
+    raw = (website or "").strip()
+    if not raw:
+        return {}
+    if not raw.lower().startswith(("http://", "https://")):
+        raw = f"https://{raw}"
+    host = urlparse(raw).netloc.lower()
+    # Social profiles carry no contact details worth trusting.
+    if any(s in host for s in ("instagram.", "facebook.", "twitter.", "x.com")):
+        return {}
+    # Link aggregators are not the venue's domain, so no email is attributable,
+    # but they are where Lagos venues put their WhatsApp button.
+    aggregator = any(s in host for s in ("linktr.ee", "linktree.com", "bento.me", "beacons.ai"))
+
+    own = client is None
+    if own:
+        client = httpx.Client(timeout=20.0, follow_redirects=True)
+    assert client is not None
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+    }
+    emails: list[str] = []
+    whatsapp: str | None = None
+    root = f"{urlparse(raw).scheme}://{urlparse(raw).netloc}"
+    try:
+        paths = [""] if aggregator else list(_CONTACT_PATHS[:max_pages + 3])
+        for path in paths:
+            if len(emails) >= 2 and whatsapp:
+                break
+            target = f"{root}{path}" if path else raw
+            body = ""
+            try:
+                resp = client.get(target, headers=headers)
+                if resp.status_code < 400:
+                    body = resp.text or ""
+                elif resp.status_code in (403, 429):
+                    # Linktree fingerprints plain clients; render it instead.
+                    from pipeline.web_menu import _fetch_via_browser
+
+                    rendered = _fetch_via_browser(target)
+                    body = rendered.decode("utf-8", "replace") if rendered else ""
+            except Exception:  # noqa: BLE001
+                continue
+            if not body:
+                continue
+            for hit in ([] if aggregator else _EMAIL.findall(body)):
+                low = hit.lower()
+                if _EMAIL_JUNK.search(low) or low in emails:
+                    continue
+                # Prefer addresses on the venue's own domain; a gmail on the
+                # venue's contact page is still theirs, an unrelated corporate
+                # domain usually is not.
+                domain = low.split("@")[-1]
+                bare = host.replace("www.", "")
+                if domain == bare or domain.endswith(bare) or domain in (
+                    "gmail.com", "yahoo.com", "outlook.com", "hotmail.com",
+                ):
+                    emails.append(low)
+            if not whatsapp:
+                m = _WA_HREF.search(body)
+                if m:
+                    digits = re.sub(r"[^\d+]", "", unquote(m.group(1)))
+                    if len(digits) >= 10:
+                        whatsapp = f"+234{digits[1:]}" if digits.startswith("0") else digits
+                else:
+                    short = _WA_SHORT.search(body)
+                    if short:
+                        whatsapp = f"https://wa.me/message/{short.group(1)}"
+    finally:
+        if own:
+            client.close()
+
+    out: dict[str, Any] = {}
+    if emails:
+        out["emails"] = emails[:2]
+    if whatsapp:
+        out["whatsApp"] = whatsapp
+    return out
+
+
+def venue_interior_images(
+    name: str,
+    *,
+    city: str = "Lagos",
+    limit: int = 8,
+    client: httpx.Client | None = None,
+) -> list[str]:
+    """
+    Image-search results showing the venue's *room*.
+
+    A venue's own Instagram grid is mostly plated food, flyers and portraits,
+    so judging lighting or seating from it fails on input quality rather than
+    on the model. An interior-targeted image search returns review-site and
+    directory photographs of the space itself.
+    """
+    if not settings.SERPER_API_KEY or not (name or "").strip():
+        return []
+    own = client is None
+    if own:
+        client = httpx.Client(timeout=30.0)
+    assert client is not None
+    urls: list[str] = []
+    try:
+        resp = client.post(
+            settings.SERPER_IMAGE_ENDPOINT,
+            headers={
+                "X-API-KEY": settings.SERPER_API_KEY,
+                "Content-Type": "application/json",
+            },
+            json={
+                "q": f"{name} {city} restaurant interior seating",
+                "num": limit * 2,
+                "gl": settings.SERPER_COUNTRY,
+            },
+        )
+        if resp.status_code >= 400:
+            log.warning("[venue-images] serper HTTP %s", resp.status_code)
+            return []
+        for item in (resp.json().get("images") or []):
+            url = item.get("imageUrl") or ""
+            # Instagram's SEO crawler endpoint serves a redirect, not an image,
+            # and TikTok's API images need headers we do not send.
+            if not url or "lookaside.instagram.com" in url or "tiktok.com/api" in url:
+                continue
+            urls.append(url)
+            if len(urls) >= limit:
+                break
+    except Exception as exc:  # noqa: BLE001
+        log.debug("[venue-images] %s failed: %s", name[:30], exc)
+    finally:
+        if own:
+            client.close()
+    return urls
+
+
+def handle_from_search(
+    name: str,
+    *,
+    city: str = "Lagos",
+    client: httpx.Client | None = None,
+    retries: int = 1,
+) -> str | None:
+    """
+    Find a venue's Instagram handle via a web search instead of Instagram.
+
+    Instagram's own topsearch needs a logged-in session that gets checkpointed;
+    a `site:instagram.com` query answers the same question without touching
+    Instagram at all. DuckDuckGo's HTML endpoint needs no API key. It answers
+    202 with an empty body when it wants you to slow down — that is a soft
+    failure, not a miss.
+    """
+    if not settings.SERPER_API_KEY:
+        log.debug("[ig-search] SERPER_API_KEY not set")
+        return None
+
+    query = f"site:instagram.com {name} {city}".strip()
+    own = client is None
+    if own:
+        client = httpx.Client(timeout=25.0)
+    assert client is not None
+    try:
+        for attempt in range(retries + 1):
+            try:
+                resp = client.post(
+                    settings.SERPER_ENDPOINT,
+                    headers={
+                        "X-API-KEY": settings.SERPER_API_KEY,
+                        "Content-Type": "application/json",
+                    },
+                    json={"q": query, "num": 10, "gl": settings.SERPER_COUNTRY},
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.debug("[ig-search] %s failed: %s", name[:30], exc)
+                return None
+            if resp.status_code == 429:
+                if attempt < retries:
+                    time.sleep(2.0)
+                    continue
+                log.warning("[ig-search] serper rate limited")
+                return None
+            if resp.status_code >= 400:
+                log.warning(
+                    "[ig-search] serper HTTP %s: %s",
+                    resp.status_code, (resp.text or "")[:120],
+                )
+                return None
+            payload = resp.json()
+            # Profile URLs only — /p/ and /reel/ links are posts that merely
+            # mention the venue, and their handle segment is the post id.
+            for item in payload.get("organic") or []:
+                link = item.get("link") or ""
+                for hit in _IG_LINK.findall(link):
+                    handle = unquote(hit).lower().strip("/")
+                    if handle in _IG_RESERVED or handle in _IG_PLACEHOLDER:
+                        continue
+                    if not _handle_relates(handle, name=name):
+                        continue
+                    return handle
+            return None
+        return None
+    finally:
+        if own:
+            client.close()
+
+
 def _resolve_google_photos(
     client: httpx.Client,
     key: str,
@@ -378,11 +641,14 @@ def search_google_places(
     if not preset:
         raise ValueError(f"unknown city {city_key!r}")
 
+    # Food-serving venues only. A nightclub is not a restaurant — Google
+    # correctly returns no `serves*` attributes for one, and the existing
+    # exploree `restaurants` rows are all kitchens (incl. hybrid
+    # "Restaurant & Lounge"), never pure clubs.
     types = [
         "restaurant",
-        "bar",
         "cafe",
-        "night_club",
+        "bakery",
         "meal_takeaway",
     ]
     places: list[dict[str, Any]] = []
@@ -444,6 +710,11 @@ def search_google_places(
                     seen.add(pid)
                     name = ((p.get("displayName") or {}).get("text") or "").strip()
                     if not name:
+                        continue
+                    # A text query for "restaurant in Lagos" still returns
+                    # clubs and delivery-only kitchens; drop them by primary
+                    # type rather than importing venues that cannot serve a meal.
+                    if (p.get("primaryType") or "") in _NON_RESTAURANT_TYPES:
                         continue
                     website = p.get("websiteUri")
                     loc = p.get("location") or {}

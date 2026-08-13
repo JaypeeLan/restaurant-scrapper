@@ -144,6 +144,18 @@ def search_flavorqueste(
                         "avgBudget": row.get("avg_budget") or row.get("averageBudget"),
                         "slug": row.get("slug"),
                         "logo": row.get("logo"),
+                        # Per-axis review scores — the closest local analogue
+                        # to Yelp's ambience/service attributes.
+                        "reviewsStat": row.get("reviewsStat") or {},
+                        "reviewCount": row.get("reviews_count"),
+                        # S3-hosted and free, unlike Google's billed photos.
+                        "photos": [
+                            m.get("url")
+                            for m in (row.get("media") or [])
+                            if isinstance(m, dict)
+                            and m.get("type") == "image"
+                            and m.get("url")
+                        ][:6],
                     }
                 )
                 if len(places) >= limit:

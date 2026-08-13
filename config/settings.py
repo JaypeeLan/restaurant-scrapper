@@ -63,9 +63,6 @@ IG_GRAPH_MEDIA_LIMIT: int = _int("IG_GRAPH_MEDIA_LIMIT", 25)
 
 # ── Source 2: Playwright (primary until Graph credentials are set) ────────────
 IG_FALLBACK_ENABLED: bool = _bool("IG_FALLBACK_ENABLED", True)
-# Only fall back for accounts Graph couldn't serve (private / personal / missing).
-# When Graph is unset, every account uses this path.
-IG_FALLBACK_AFTER_FAILURES: int = _int("IG_FALLBACK_AFTER_FAILURES", 2)
 # The single most important number here. Above ~120/hr from one IP you WILL
 # start collecting interstitials. Keep this low and let it drain over days.
 IG_FALLBACK_MAX_PER_RUN: int = _int("IG_FALLBACK_MAX_PER_RUN", 40)
@@ -81,8 +78,6 @@ IG_HIGHLIGHTS_ENABLED: bool = _bool("IG_HIGHLIGHTS_ENABLED", True)
 
 # ── Concurrency / pacing ──────────────────────────────────────────────────────
 IG_CONCURRENCY: int = _int("IG_CONCURRENCY", 4)
-IG_MIN_DELAY_MS: int = _int("IG_MIN_DELAY_MS", 200)
-IG_MAX_DELAY_MS: int = _int("IG_MAX_DELAY_MS", 700)
 IG_CIRCUIT_THRESHOLD: int = _int("IG_CIRCUIT_THRESHOLD", 12)
 
 # ── Tiered refresh cadence (hours between fetches) ────────────────────────────
@@ -133,6 +128,37 @@ IG_SEARCH_GAP_S: float = float(_str("IG_SEARCH_GAP_S", "2.5") or "2.5")
 COL_HANDLE_CANDIDATES: str = _str("IG_COL_HANDLE_CANDIDATES", "ig_handle_candidates")
 COL_PLACES: str = _str("IG_COL_PLACES", "places_raw")
 COL_EXTERNAL_EVENTS: str = _str("IG_COL_EXTERNAL_EVENTS", "external_events")
+
+# ── Gemini vision (venue photo → ambience attributes) ─────────────────────────
+# Lighting/coziness are visual properties; review text mentions them for only
+# ~20% of Lagos venues, while ~60% already have usable photos.
+GEMINI_API_KEY: str = _str("GEMINI_API_KEY", "")
+# 2.5-* are closed to new API keys; the -latest aliases track current models.
+GEMINI_MODEL: str = _str("GEMINI_MODEL", "gemini-flash-latest")
+# Free-tier requests are deprioritised under load, and one model can be busy
+# while a sibling answers instantly. Tried in order after the primary.
+GEMINI_FALLBACK_MODELS: list[str] = [
+    m.strip()
+    for m in _str(
+        "GEMINI_FALLBACK_MODELS", "gemini-3-flash-preview,gemini-flash-lite-latest"
+    ).split(",")
+    if m.strip()
+]
+GEMINI_ENABLED: bool = _bool("GEMINI_ENABLED", True)
+# Eight inlined images is a multi-megabyte request; 120s was timing out.
+GEMINI_TIMEOUT_S: float = float(_str("GEMINI_TIMEOUT_S", "240") or "240")
+# Directory galleries and Instagram grids are mostly food close-ups; three
+# frames often contain no room at all, which is what made `lighting` null on
+# venues that had six perfectly good photos.
+GEMINI_MAX_PHOTOS: int = _int("GEMINI_MAX_PHOTOS", 8)
+
+# ── Serper (Google SERP) — Instagram handle lookup ────────────────────────────
+# Instagram's own topsearch needs a logged-in session that gets checkpointed;
+# a `site:instagram.com` query answers the same question without touching it.
+SERPER_API_KEY: str = _str("SERPER_API_KEY", "")
+SERPER_ENDPOINT: str = _str("SERPER_ENDPOINT", "https://google.serper.dev/search")
+SERPER_COUNTRY: str = _str("SERPER_COUNTRY", "ng")
+SERPER_IMAGE_ENDPOINT: str = _str("SERPER_IMAGE_ENDPOINT", "https://google.serper.dev/images")
 
 # ── Venue discovery (Places → Instagram handles) ──────────────────────────────
 # auto = Google if key else OSM

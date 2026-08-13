@@ -168,12 +168,46 @@ def search_reisty(
                     "rating": src.get("ReviewDetails", {}).get("Rating")
                     if isinstance(src.get("ReviewDetails"), dict)
                     else row.get("Rating"),
+                    # Free-text reviews — Google caps its own at 5 per venue,
+                    # so these widen the corpus the ambience LLM sees.
+                    "reviews": [
+                        (rv or {}).get("Comment", "").strip()
+                        for rv in (
+                            (src.get("ReviewDetails") or {}).get("Reviews") or []
+                        )
+                        if isinstance(rv, dict) and (rv or {}).get("Comment", "").strip()
+                    ][:20]
+                    if isinstance(src.get("ReviewDetails"), dict)
+                    else [],
+                    # Per-axis scores incl. NoiseLevels and Ambience.
+                    "categoryRating": (src.get("ReviewDetails") or {}).get("CategoryRating")
+                    or {}
+                    if isinstance(src.get("ReviewDetails"), dict)
+                    else {},
                     "avgBudget": src.get("AverageCost") or None,
                     "cuisines": src.get("OtherCuisines") or [],
                     "lga": src.get("LGA") or row.get("LGA"),
                     "dressCode": src.get("DressCode"),
                     "parking": src.get("ParkingOption"),
                     "slug": src.get("QuerySlot") or row.get("QuerySlot"),
+                    # Named seating areas ('INDOOR', 'Lounge', 'Gallery') —
+                    # the only structured seating signal any Lagos source has.
+                    "floorPlans": [
+                        (fp or {}).get("Name")
+                        for fp in (src.get("FloorPlans") or [])
+                        if isinstance(fp, dict) and (fp or {}).get("Name")
+                    ],
+                    "partySize": src.get("PartySize") or {},
+                    # HTML rules blob; often states dress code / policies.
+                    "houseRules": ((src.get("Experience") or {}).get("HouseRules") or None)
+                    if isinstance(src.get("Experience"), dict)
+                    else None,
+                    "depositPerPerson": src.get("DepositPerPerson"),
+                    "photos": [
+                        (p or {}).get("Link")
+                        for p in (src.get("Photos") or [])
+                        if isinstance(p, dict) and (p or {}).get("Link")
+                    ][:6],
                 }
             )
 
