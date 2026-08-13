@@ -316,7 +316,11 @@ def write_mongo(
         for step in plan_steps:
             kind = step["entity"]
             record = step["_record"]
-            if step["missingRequired"] or step["invalidValues"]:
+            # `owner` is filled from the organizer written moments ago, so it
+            # is legitimately absent when the step was validated. Gate on
+            # everything else, then fail the record only if it stays unresolved.
+            blocking = [g for g in step["missingRequired"] if g != "owner"]
+            if blocking or step["invalidValues"]:
                 stats["skipped"] += 1
                 continue
 
