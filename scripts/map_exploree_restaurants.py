@@ -51,17 +51,17 @@ ALL_DAYS = list(DAY_FULL.values())
 FIELD_PRECEDENCE: dict[str, tuple[str, ...]] = {
     "coordinates":  ("google", "flavorqueste", "osm", "reisty"),
     "openingTimes": ("google", "flavorqueste", "reisty"),
-    "description":  ("reisty", "flavorqueste", "google"),
-    "phone":        ("reisty", "flavorqueste", "google", "osm"),
-    "email":        ("reisty", "flavorqueste", "google"),
+    "description":  ("reisty", "dinesurf", "flavorqueste", "google"),
+    "phone":        ("reisty", "dinesurf", "flavorqueste", "google", "osm"),
+    "email":        ("reisty", "dinesurf", "flavorqueste", "google"),
     "website":      ("reisty", "flavorqueste", "google", "osm"),
     "instagram":    ("reisty", "flavorqueste", "google"),
     "address":      ("google", "flavorqueste", "reisty", "osm"),
     # Google's priceRange is a real NGN band; the directories only have an
     # averaged spend, so Google leads even though both can answer.
-    "minimumSpend": ("google", "reisty", "flavorqueste"),
+    "minimumSpend": ("google", "reisty", "dinesurf", "flavorqueste"),
     "dressCode":    ("reisty",),
-    "cuisine":      ("flavorqueste", "reisty", "google"),
+    "cuisine":      ("dinesurf", "flavorqueste", "reisty", "google"),
     # Google aggregates far more reviews than the local apps, so its score is
     # the trustworthy one even where a directory also has a rating.
     "rating":       ("google", "flavorqueste", "reisty"),
@@ -1106,6 +1106,7 @@ def enrich_cluster(
     geocode: bool,
     resolve_ig: bool,
     find_menu: bool = True,
+    use_dinesurf: bool = True,
     client: Any = None,
 ) -> dict[str, Any]:
     """
@@ -1151,6 +1152,14 @@ def enrich_cluster(
                 "instagramHint": handle,
             })
             notes["instagramFrom"] = origin
+
+    if use_dinesurf and not any(p.get("source") == "dinesurf" for p in cluster):
+        from discover.dinesurf import fetch_venue as dinesurf_venue
+
+        venue = dinesurf_venue(cluster[0].get("name") or "", client=client)
+        if venue:
+            cluster.append(venue)
+            notes["dinesurf"] = venue.get("slug")
 
     if resolve_ig:
         from discover.places import harvest_contacts
@@ -1242,7 +1251,12 @@ def to_restaurant_payload(
         "emails": [email] if email else None,
         "phones": [phone] if phone else None,
         "website": pick("website", lambda p: p.get("website")),
-        "whatsApp": next((p.get("whatsApp") for p in cluster if p.get("whatsApp")), None),
+        # DineSurf stores the number as a field; everyone else needs a wa.me
+        # link to exist, so it leads here.
+        "whatsApp": next(
+            (p.get("whatsApp") for p in cluster if p.get("source") == "dinesurf" and p.get("whatsApp")),
+            None,
+        ) or next((p.get("whatsApp") for p in cluster if p.get("whatsApp")), None),
         "openingTimes": hours,
         "dateEstablished": next(
             (p.get("dateEstablished") for p in cluster if p.get("dateEstablished")), None
@@ -1293,6 +1307,8 @@ def to_restaurant_payload(
     ):
         if fn(cluster):
             attribution[field] = "google"
+    if any(p.get("source") == "dinesurf" for p in cluster):
+        attribution["dinesurf"] = "matched"
     if _floorplan_seating(cluster):
         attribution["seatingOptions"] = "reisty-floorplans"
     elif _seating_of(cluster):
@@ -1327,7 +1343,7 @@ def to_restaurant_payload(
     # FlavorQueste (S3) and Reisty (Cloudinary) photos are free and stable;
     # Google's cost a billed request each, so they go last.
     photos: list[str] = []
-    for provider in ("flavorqueste", "reisty", "google", "instagram", "website"):
+    for provider in ("dinesurf", "flavorqueste", "reisty", "google", "instagram", "website"):
         for place in cluster:
             if place.get("source") == provider:
                 photos.extend(p for p in (place.get("photos") or []) if p)
@@ -1418,6 +1434,7 @@ def main() -> int:
     ap.add_argument("--no-geocode", action="store_true", help="skip coordinate backfill")
     ap.add_argument("--no-ig", action="store_true", help="skip website→IG handle lookup")
     ap.add_argument("--no-menu", action="store_true", help="skip Linktree/website menu discovery")
+    ap.add_argument("--no-dinesurf", action="store_true", help="skip DineSurf venue lookup")
     ap.add_argument("--no-llm", action="store_true", help="skip DeepSeek ambience inference")
     ap.add_argument("--no-vision", action="store_true", help="skip Gemini photo ambience pass")
     ap.add_argument("--no-menu-llm", action="store_true", help="skip menu-based cuisine/meal inference")
@@ -1516,6 +1533,7 @@ def main() -> int:
                     geocode=not args.no_geocode,
                     resolve_ig=not args.no_ig,
                     find_menu=not args.no_menu,
+                    use_dinesurf=not args.no_dinesurf,
                     client=client,
                 )
             )
