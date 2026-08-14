@@ -45,13 +45,15 @@ SAMPLES = Path("docs/sample_payloads")
 # Keys the mappers attach for provenance or convenience. None belong in a POST
 # body: Joi rejects unknown keys outright.
 STRIP = {
-    "sourceRef", "ownerRef", "googlePlaceId", "rating", "photos", "menuUrl",
+    "sourceRef", "ownerRef", "restaurantRef", "googlePlaceId", "rating",
+    "photos", "menuUrl",
     "isIndividual", "eventCount", "tixUsername", "imageUrl", "sourceUrl",
     "_meta", "_evidence",
 }
 
 REQUIRED = {
     "organizers": ["name", "description"],
+    "menus": ["itemName", "price", "category", "type", "restaurant"],
     "restaurants": [
         "name", "address", "openingTimes", "meal", "service", "lighting",
         "minimumSpend", "dressCode", "seatingOptions",
@@ -65,6 +67,7 @@ REQUIRED = {
 # Verified against exploree-api: routes mount under /v1 in
 # src/core/server/index.ts, and collections are plural in app/routes.ts.
 ENDPOINTS = {
+    "menus": "/v1/restaurants/menu",
     "organizers": "/v1/organizers",
     "restaurants": "/v1/restaurants",
     "experiences": "/v1/experiences",
@@ -95,6 +98,7 @@ EXPLOREE_SRC = Path("/Users/mac/Desktop/exploree-api/src/app/services")
 _TYPE_FILES = (
     EXPLOREE_SRC / "restaurant/restaurant/restaurant.types.ts",
     EXPLOREE_SRC / "experience/experience.types.ts",
+    EXPLOREE_SRC / "restaurant/menu/menu.types.ts",
 )
 _HHMM = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 # Lagos sits near 6.5 N, 3.4 E. Anything outside this box is a bad geocode or
@@ -115,6 +119,7 @@ ENUM_FIELDS = {
         "sourceType": "SourceType",
     },
     "organizers": {},
+    "menus": {"category": "Categories"},
 }
 
 
@@ -205,6 +210,17 @@ def missing_required(kind: str, body: dict[str, Any], record: dict[str, Any]) ->
     return gaps
 
 
+def restaurant_key(ref: dict[str, Any] | None) -> str | None:
+    """Match a dish to the restaurant it belongs to."""
+    if not isinstance(ref, dict):
+        return None
+    place_id = ref.get("googlePlaceId")
+    if place_id:
+        return f"google:{place_id}"
+    name = (ref.get("name") or "").strip().lower()
+    return f"name:{name}" if name else None
+
+
 def owner_key(ref: dict[str, Any] | None) -> str | None:
     """Stable key for matching an experience to the organizer it belongs to."""
     if not isinstance(ref, dict):
@@ -229,6 +245,7 @@ def organizer_keys(record: dict[str, Any]) -> list[str]:
 
 
 COLLECTIONS = {
+    "menus": "menus",
     "organizers": "organizers",
     "restaurants": "restaurants",
     "experiences": "experiences",
@@ -259,6 +276,14 @@ def upsert_filter(kind: str, record: dict[str, Any]) -> dict[str, Any] | None:
     if kind == "restaurants":
         place_id = record.get("googlePlaceId")
         return {"googlePlaceId": place_id} if place_id else None
+    if kind == "menus":
+        # A dish is identified by its venue plus its name; re-running a menu
+        # should update prices, not append a second copy of every item.
+        ref = record.get("restaurantRef") or {}
+        return {
+            "sourcePlaceId": ref.get("googlePlaceId"),
+            "itemName": record.get("itemName"),
+        } if ref.get("googlePlaceId") and record.get("itemName") else None
     ref = record.get("sourceRef") or record.get("ownerRef") or {}
     external = ref.get("externalId")
     if external:
@@ -271,6 +296,14 @@ def to_document(kind: str, body: dict[str, Any], record: dict[str, Any]) -> dict
     """Request body plus the fields Mongoose would have supplied."""
     now = datetime.now(timezone.utc)
     doc = dict(body)
+    if kind == "menus":
+        # A dish is not a listing: no slug, no views, no active flag.
+        doc["archived"] = False
+        doc["updatedAt"] = now
+        ref = record.get("restaurantRef") or {}
+        if ref.get("googlePlaceId"):
+            doc["sourcePlaceId"] = ref["googlePlaceId"]
+        return doc
     doc.update(DOC_DEFAULTS)
     doc["slug"] = slugify(record.get("name") or "")
     doc["updatedAt"] = now
@@ -311,6 +344,7 @@ def write_mongo(
         db = client[db_name]
     stats = {"inserted": 0, "updated": 0, "wouldWrite": 0, "skipped": 0, "unresolved": 0}
     organizer_ids: dict[str, Any] = {}
+    restaurant_ids: dict[str, Any] = {}
 
     try:
         for step in plan_steps:
@@ -319,12 +353,24 @@ def write_mongo(
             # `owner` is filled from the organizer written moments ago, so it
             # is legitimately absent when the step was validated. Gate on
             # everything else, then fail the record only if it stays unresolved.
-            blocking = [g for g in step["missingRequired"] if g != "owner"]
+            # `owner` and `restaurant` are filled from rows written moments
+            # earlier in this same pass, so they are legitimately absent when
+            # the step was validated.
+            deferred = {"owner", "restaurant"}
+            blocking = [g for g in step["missingRequired"] if g not in deferred]
             if blocking or step["invalidValues"]:
                 stats["skipped"] += 1
                 continue
 
             body = dict(step["body"])
+            if kind == "menus":
+                key = restaurant_key(record.get("restaurantRef"))
+                venue_id = restaurant_ids.get(key) if key else None
+                if not venue_id:
+                    stats["unresolved"] += 1
+                    step["error"] = "restaurant not resolved"
+                    continue
+                body["restaurant"] = venue_id
             if kind == "experiences":
                 key = owner_key(record.get("ownerRef"))
                 owner_id = organizer_ids.get(key) if key else None
@@ -366,6 +412,12 @@ def write_mongo(
             if kind == "organizers" and doc_id:
                 for key in organizer_keys(record):
                     organizer_ids[key] = doc_id
+            if kind == "restaurants" and doc_id:
+                if record.get("googlePlaceId"):
+                    restaurant_ids[f"google:{record['googlePlaceId']}"] = doc_id
+                name = (record.get("name") or "").strip().lower()
+                if name:
+                    restaurant_ids[f"name:{name}"] = doc_id
     finally:
         client.close()
     return stats
@@ -420,7 +472,7 @@ def main() -> int:
     else:
         print(f"  loaded {len(enums)} enums from the API source", file=sys.stderr)
 
-    data = {kind: load(kind) for kind in ("organizers", "restaurants", "experiences")}
+    data = {kind: load(kind) for kind in ("organizers", "restaurants", "menus", "experiences")}
     for kind, rows in data.items():
         print(f"  {kind}: {len(rows)} records", file=sys.stderr)
 
@@ -444,7 +496,7 @@ def main() -> int:
         client = httpx.Client(timeout=60.0)
 
     try:
-        for kind in ("organizers", "restaurants", "experiences"):
+        for kind in ("organizers", "restaurants", "menus", "experiences"):
             for record in data[kind]:
                 body = to_body(record)
 

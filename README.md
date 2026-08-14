@@ -15,6 +15,7 @@ Three mapping scripts, one per entity:
 | `scripts/map_exploree_restaurants.py` | `Restaurant` records | Google Places, FlavorQueste, Serper, Instagram, Gemini vision, DeepSeek |
 | `scripts/map_exploree_experiences.py` | `Experience` records | Tix Africa, Reisty events, Google geocoding, DeepSeek |
 | `scripts/map_exploree_organizers.py` | `Organizer` records | Tix Africa |
+| `scripts/map_exploree_menus.py` | `Menu` records, one per dish | the venue's menu PDF or page |
 
 There is also an older Instagram post ingest (`main.py`, `run_ingest.py`,
 `serve.py`, `web/`) that stores posts in MongoDB and serves a dashboard. It
@@ -62,7 +63,9 @@ but a 500 venue run needs billing enabled on the project.
 4. Fill the gaps:
    - Instagram handle from the venue website, then Serper search
    - Coordinates from Google geocoding when no provider has them
-   - Menu URL from the site, Linktree, or the Instagram bio link
+   - Menu URL from the site, a link aggregator, or the Instagram bio link,
+     followed through to the actual document rather than stopping at the
+     aggregator
    - Emails from the venue's own domain, WhatsApp from its Linktree
    - Cuisine and meal service by reading the menu itself, falling back to the
      description, categories and reviews when a venue publishes no menu
@@ -146,6 +149,25 @@ Rare: emails. Small venues mostly do not publish one. Harvesting is restricted
 to the venue's own domain because open web search returns a nearby hotel's
 address, a directory's placeholder, or a review blog's editor.
 
+## Menus
+
+`map_exploree_menus.py` itemises whatever the restaurant mapper found, turning
+a menu into one row per dish with a name, price, category and type.
+
+Run it after the restaurant mapper, since it reads that output.
+
+Coverage is limited by what venues publish. A menu URL is often a Linktree or
+a Threads profile rather than a menu, and following it through only helps if
+a menu is actually linked there. On the last sample one venue in five had a
+real menu; that one produced 36 dishes.
+
+Two things are dropped rather than written: dishes with no price, because the
+extractor defaults those to zero and every dish would publish as free, and any
+category outside the API's enum.
+
+Prices are read as printed. Lagos menus are usually in thousands, so `51.5`
+becomes 51,500 rather than fifty naira.
+
 ## Pushing to the database
 
 ```bash
@@ -163,9 +185,10 @@ required field is present and every value is one the schema accepts, which is
 checked by parsing the enums out of the API's TypeScript rather than by
 restating them here. A partial venue is worse than an absent one.
 
-Order matters and is enforced. `Experience.owner` is a Mongo id, so organizers
-and restaurants are written first, their ids are kept, and each experience
-resolves its `ownerRef` against them. In a dry run those ids do not exist yet,
+Order matters and is enforced. Organizers and restaurants are written first
+and their ids kept, then menus resolve `restaurantRef` and experiences resolve
+`ownerRef` against them. Both are Mongo ids, so the rows they point at have to
+exist first. In a dry run those ids do not exist yet,
 so experiences report as unresolved rather than being counted as writable.
 
 Re-running upserts instead of duplicating. Restaurants match on

@@ -1100,6 +1100,32 @@ def infer_from_serp(cluster: list[dict[str, Any]], *, city: str = "Lagos") -> di
     return clean
 
 
+_AGGREGATORS = ("linktr.ee", "linktree.com", "bento.me", "beacons.ai",
+                "milkshake", "threads.com", "threads.net", "campsite.bio")
+
+
+def resolve_menu_link(url: str) -> str:
+    """
+    Follow a link-in-bio page to the menu behind it.
+
+    Venues put a Linktree in their bio, not a menu. Storing the aggregator as
+    `menuUrl` is enough to classify cuisine from surrounding text, but dish
+    itemisation needs the real document.
+    """
+    low = (url or "").lower()
+    if not any(host in low for host in _AGGREGATORS):
+        return url
+    try:
+        from pipeline.web_menu import discover_menu_sources, pick_best_source
+
+        best = pick_best_source(discover_menu_sources(url))
+        if best and best.url and best.url != url:
+            return best.url
+    except Exception as exc:  # noqa: BLE001
+        print(f"    menu link follow failed: {exc}", file=sys.stderr)
+    return url
+
+
 def enrich_cluster(
     cluster: list[dict[str, Any]],
     *,
@@ -1589,7 +1615,10 @@ def main() -> int:
                 if parsed.get("linkInBio") and not any(
                     p.get("menuUrl") for p in wanted[handle]
                 ):
-                    row["menuUrl"] = parsed["linkInBio"]
+                    # A link-in-bio page is not a menu. Follow it through to
+                    # the actual menu, and only keep the aggregator itself as
+                    # a last resort so cuisine still has something to read.
+                    row["menuUrl"] = resolve_menu_link(parsed["linkInBio"])
                 wanted[handle].append(row)
             print(
                 f"  instagram: {len(profiles)}/{len(wanted)} profiles read",
