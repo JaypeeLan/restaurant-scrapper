@@ -162,14 +162,9 @@ SERPER_IMAGE_ENDPOINT: str = _str("SERPER_IMAGE_ENDPOINT", "https://google.serpe
 
 # ── Venue discovery (Places → Instagram handles) ──────────────────────────────
 # auto = Google if key else OSM
-# enrich = FlavorQueste + Reisty (+ Google/OSM) — denser Lagos restaurant data
+# enrich = FlavorQueste (+ Google/OSM) — denser Lagos restaurant data
 PLACES_BACKEND: str = _str("PLACES_BACKEND", "enrich")
 GOOGLE_PLACES_API_KEY: str = _str("GOOGLE_PLACES_API_KEY", "")
-# Public client key shipped in Reisty's SPA (guest endpoints require apiKey header).
-REISTY_API_KEY: str = _str(
-    "REISTY_API_KEY",
-    "93443138-ba3a-4e8d-98ae-d7a1020ccc35",
-)
 OVERPASS_URL: str = _str(
     "OVERPASS_URL",
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",

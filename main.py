@@ -4,7 +4,7 @@ CLI entrypoint.
     python main.py preflight
     python main.py seed --file handles.txt
     python main.py discover --city lagos --backend enrich
-    python main.py discover-events --sources reisty,tix
+    python main.py discover-events --sources tix
     python main.py capacity
     python main.py ingest --limit 200
     python main.py schedule --every 30 --discover-every 4
@@ -78,12 +78,7 @@ def cmd_preflight(_: argparse.Namespace) -> int:
     print(
         "  ✓ google places configured"
         if settings.GOOGLE_PLACES_API_KEY
-        else "  ! google places not set — enrich still uses FlavorQueste/Reisty (+ OSM)"
-    )
-    print(
-        "  ✓ reisty api key set"
-        if settings.REISTY_API_KEY
-        else "  ! REISTY_API_KEY missing — restaurant/event enrich skips Reisty"
+        else "  ! google places not set — enrich still uses FlavorQueste (+ OSM)"
     )
     return 0
 
@@ -484,10 +479,10 @@ def cmd_discover(args: argparse.Namespace) -> int:
 
 
 def cmd_discover_events(args: argparse.Namespace) -> int:
-    """Pull organizer/restaurant events from Reisty + Tix into Mongo."""
+    """Pull organizer events from Tix into Mongo."""
     from discover.run_events import run_discover_events
 
-    sources = [s.strip() for s in (args.sources or "reisty,tix").split(",") if s.strip()]
+    sources = [s.strip() for s in (args.sources or "tix").split(",") if s.strip()]
     try:
         summary = run_discover_events(
             sources=sources,
@@ -622,7 +617,7 @@ def main() -> int:
 
     p_disc = sub.add_parser(
         "discover",
-        help="Places (FlavorQueste/Reisty/Google/OSM) → IG handles → seed accounts",
+        help="Places (FlavorQueste/Google/OSM) → IG handles → seed accounts",
     )
     p_disc.add_argument("--city", default=settings.DISCOVER_CITY, help="lagos | abuja")
     p_disc.add_argument("--place-limit", type=int, default=settings.DISCOVER_PLACE_LIMIT)
@@ -634,9 +629,9 @@ def main() -> int:
     )
     p_disc.add_argument(
         "--backend",
-        choices=["auto", "osm", "google", "flavorqueste", "reisty", "enrich"],
+        choices=["auto", "osm", "google", "flavorqueste", "enrich"],
         default=settings.PLACES_BACKEND,
-        help="enrich=FQ+Reisty(+maps); auto=google|osm",
+        help="enrich=FQ(+maps); auto=google|osm",
     )
     p_disc.add_argument("--min-score", type=float, default=None)
     p_disc.add_argument("--no-seed", action="store_true")
@@ -656,12 +651,12 @@ def main() -> int:
 
     p_ev = sub.add_parser(
         "discover-events",
-        help="pull Lagos events from Reisty + Tix into external_events",
+        help="pull Lagos events from Tix into external_events",
     )
     p_ev.add_argument(
         "--sources",
-        default="reisty,tix",
-        help="comma list: reisty,tix,all",
+        default="tix",
+        help="comma list: tix,all",
     )
     p_ev.add_argument("--limit", type=int, default=settings.DISCOVER_EVENTS_LIMIT)
     p_ev.add_argument("--dry-run", action="store_true")

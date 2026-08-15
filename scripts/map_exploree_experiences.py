@@ -252,11 +252,9 @@ def to_experience_record(
         f"{name or ''} {event.get('description') or ''}"
     )
 
-    # Reisty events hang off a restaurant; Tix events off a ticketing account.
-    source_type = "Restaurant" if source == "reisty" else "Organizer"
-    owner_ref = (
-        event.get("restaurantId") if source == "reisty" else event.get("organizerId")
-    )
+    # Tix events hang off a ticketing organizer account.
+    source_type = "Organizer"
+    owner_ref = event.get("organizerId")
 
     record = {
         "name": name,
@@ -315,11 +313,9 @@ def to_experience_record(
 
 def collect(limit: int) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
-    from discover.reisty import fetch_reisty_events
     from discover.tix import fetch_tix_events
 
     for label, fn in (
-        ("reisty", lambda: fetch_reisty_events(limit=limit)),
         ("tix", lambda: fetch_tix_events(limit=limit, lagos_only=True)),
     ):
         try:

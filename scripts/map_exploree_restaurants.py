@@ -1,7 +1,7 @@
 """
 Map discovered Lagos venues into the exploree-api ``Restaurant`` create shape.
 
-Every provider (Reisty, FlavorQueste, Google Places / OSM) is pulled, venues
+Every provider (FlavorQueste, Google Places / OSM) is pulled, venues
 are matched across providers, and each target field takes the best available
 value — so one output row is the union of what all sources know, not one
 source's slice. Fields nobody fills stay ``null``.
@@ -49,22 +49,22 @@ ALL_DAYS = list(DAY_FULL.values())
 # Provider precedence per field — first provider that has a usable value wins.
 # Ordered by how trustworthy that provider is *for that specific field*.
 FIELD_PRECEDENCE: dict[str, tuple[str, ...]] = {
-    "coordinates":  ("google", "flavorqueste", "osm", "reisty"),
-    "openingTimes": ("google", "flavorqueste", "reisty"),
-    "description":  ("reisty", "dinesurf", "flavorqueste", "google"),
-    "phone":        ("reisty", "dinesurf", "flavorqueste", "google", "osm"),
-    "email":        ("reisty", "dinesurf", "flavorqueste", "google"),
-    "website":      ("reisty", "flavorqueste", "google", "osm"),
-    "instagram":    ("reisty", "flavorqueste", "google"),
-    "address":      ("google", "flavorqueste", "reisty", "osm"),
+    "coordinates":  ("google", "flavorqueste", "osm"),
+    "openingTimes": ("google", "flavorqueste"),
+    "description":  ("dinesurf", "flavorqueste", "google"),
+    "phone":        ("dinesurf", "flavorqueste", "google", "osm"),
+    "email":        ("dinesurf", "flavorqueste", "google"),
+    "website":      ("flavorqueste", "google", "osm"),
+    "instagram":    ("flavorqueste", "google"),
+    "address":      ("google", "flavorqueste", "osm"),
     # Google's priceRange is a real NGN band; the directories only have an
     # averaged spend, so Google leads even though both can answer.
-    "minimumSpend": ("google", "reisty", "dinesurf", "flavorqueste"),
-    "dressCode":    ("reisty",),
-    "cuisine":      ("dinesurf", "flavorqueste", "reisty", "google"),
+    "minimumSpend": ("google", "dinesurf", "flavorqueste"),
+    "dressCode":    ("serp", "flavorqueste", "dinesurf"),
+    "cuisine":      ("dinesurf", "flavorqueste", "google"),
     # Google aggregates far more reviews than the local apps, so its score is
     # the trustworthy one even where a directory also has a rating.
-    "rating":       ("google", "flavorqueste", "reisty"),
+    "rating":       ("google", "flavorqueste"),
 }
 
 # Fields where the primary provider must NOT be promoted, because it has no
@@ -135,8 +135,8 @@ def _parse_hours(hours: str | None) -> tuple[dict[str, Any] | None, bool]:
     """
     → ({Day: {open, close}}, inferred?)
 
-    Google and FlavorQueste carry real per-day rows. Reisty gives one blob for
-    the whole week, so it is expanded across all 7 days and flagged inferred.
+    Google and FlavorQueste carry real per-day rows. A single open–close blob
+    for the whole week is expanded across all 7 days and flagged inferred.
     """
     if not hours:
         return None, False
@@ -192,8 +192,8 @@ def group_venues(places: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     Cluster the same venue across providers.
 
     Normalised-name equality is the key; coordinates only *veto* a match when
-    both sides have them and disagree, so Reisty's missing geo never blocks a
-    merge it should have joined.
+    both sides have them and disagree, so a directory row missing geo never
+    blocks a merge it should have joined.
     """
     clusters: list[list[dict[str, Any]]] = []
     by_name: dict[str, list[int]] = {}
@@ -259,7 +259,7 @@ def _cuisine_of(place: dict[str, Any]) -> list[str] | None:
 
 
 def _spend_of(place: dict[str, Any]) -> int | None:
-    """FlavorQueste avg_budget is a float ('26666.67'); Reisty AverageCost too."""
+    """FlavorQueste avg_budget is a float ('26666.67')."""
     raw = place.get("avgBudget")
     if raw in (None, "", 0, "0"):
         return None
@@ -289,8 +289,7 @@ def _coords_of(place: dict[str, Any]) -> list[float] | None:
     """
     exploree Address.coordinates is [longitude, latitude] — flip ours.
 
-    Reisty ships Latitude/Longitude as a literal 0.0 on every row, so null
-    island has to be rejected rather than posted as a real fix.
+    Reject null-island (0,0) rather than posting it as a real fix.
     """
     lat, lng = place.get("lat"), place.get("lng")
     if lat is None or lng is None:
@@ -338,7 +337,7 @@ def _service_of(cluster: list[dict[str, Any]]) -> list[str] | None:
 
 
 def _seating_of(cluster: list[dict[str, Any]]) -> list[str] | None:
-    """Reisty floor plans name real areas; Google only flags outdoor."""
+    """Floor-plan names (when present) plus Google outdoor flag."""
     hits = _floorplan_seating(cluster)
     if _attrs(cluster).get("outdoorSeating") is True and "Outdoor Seating" not in hits:
         hits.append("Outdoor Seating")
@@ -381,7 +380,7 @@ def _bool_attr(cluster: list[dict[str, Any]], key: str) -> bool | None:
     return bool(value) if value is not None else None
 
 
-# Reisty floor-plan names → SeatingOption enum. Names with no enum equivalent
+# Floor-plan names → SeatingOption enum. Names with no enum equivalent
 # ('INDOOR', 'Gallery') are intentionally dropped rather than approximated.
 _FLOORPLAN_MAP = (
     (("outdoor", "garden", "terrace", "patio", "poolside"), "Outdoor Seating"),
@@ -423,22 +422,11 @@ def _tags(cluster: list[dict[str, Any]]) -> list[str]:
     return out
 
 
-def _reisty_category(cluster: list[dict[str, Any]], key: str) -> Any:
-    for place in cluster:
-        cat = place.get("categoryRating") or {}
-        if isinstance(cat, dict) and cat.get(key) is not None:
-            return cat[key]
-    return None
-
-
 def _picturesque_of(cluster: list[dict[str, Any]]) -> str | None:
-    """FlavorQueste and Reisty both score ambience; 'Snapworthy' is explicit."""
+    """FlavorQueste scores ambience; 'Snapworthy' is explicit."""
     if any("snapworthy" in t.lower() for t in _tags(cluster)):
         return "Great"
-    return _rating_band(
-        _fq_stat(cluster, "ambience") or _reisty_category(cluster, "Ambience"),
-        4.5, 3.5,
-    )
+    return _rating_band(_fq_stat(cluster, "ambience"), 4.5, 3.5)
 
 
 def _service_speed_of(cluster: list[dict[str, Any]]) -> str | None:
@@ -516,7 +504,7 @@ def _party_size(cluster: list[dict[str, Any]]) -> int | None:
 
 
 def _house_rules_dress(cluster: list[dict[str, Any]]) -> bool | None:
-    """Reisty buries dress policy in an HTML house-rules blob."""
+    """Some directories bury dress policy in an HTML house-rules blob."""
     for place in cluster:
         rules = place.get("houseRules")
         if rules and "dress" in str(rules).lower():
@@ -722,7 +710,7 @@ def infer_vibe_vision(cluster: list[dict[str, Any]]) -> dict[str, Any]:
 
     name_for_search = next((p.get("name") for p in cluster if p.get("name")), "")
     urls.extend(venue_interior_images(name_for_search, limit=6))
-    for provider in ("flavorqueste", "google", "reisty", "instagram"):
+    for provider in ("flavorqueste", "google", "instagram"):
         for place in cluster:
             if place.get("source") == provider:
                 urls.extend(u for u in (place.get("photos") or []) if u)
@@ -1336,7 +1324,7 @@ def to_restaurant_payload(
     if any(p.get("source") == "dinesurf" for p in cluster):
         attribution["dinesurf"] = "matched"
     if _floorplan_seating(cluster):
-        attribution["seatingOptions"] = "reisty-floorplans"
+        attribution["seatingOptions"] = "floorplans"
     elif _seating_of(cluster):
         attribution["seatingOptions"] = "google"
     if menu.get("cuisine"):
@@ -1350,7 +1338,7 @@ def to_restaurant_payload(
     if _music_of(cluster):
         attribution["music"] = "tags/liveMusic"
     if payload.get("dressCode") is not None and "dressCode" not in attribution:
-        attribution["dressCode"] = "reisty-houserules"
+        attribution["dressCode"] = "house-rules"
 
     required = [
         "name", "address", "openingTimes", "meal", "service",
@@ -1366,10 +1354,10 @@ def to_restaurant_payload(
 
     # coverImage / imageUrl are Joi.forbidden on create — photos go up through
     # the separate upload endpoints after the restaurant exists.
-    # FlavorQueste (S3) and Reisty (Cloudinary) photos are free and stable;
-    # Google's cost a billed request each, so they go last.
+    # FlavorQueste (S3) photos are free and stable; Google's cost a billed
+    # request each, so they go last.
     photos: list[str] = []
-    for provider in ("dinesurf", "flavorqueste", "reisty", "google", "instagram", "website"):
+    for provider in ("dinesurf", "flavorqueste", "google", "instagram", "website"):
         for place in cluster:
             if place.get("source") == provider:
                 photos.extend(p for p in (place.get("photos") or []) if p)
@@ -1404,28 +1392,21 @@ def to_restaurant_payload(
 
 def collect(
     city: str, per_source: int, photo_limit: int,
-    rich: bool = True, enrich_deep: bool = True, with_reisty: bool = False,
+    rich: bool = True, enrich_deep: bool = True,
 ) -> list[dict[str, Any]]:
     """Every configured provider — Google only when a key is present."""
     from config import settings
     from discover.flavorqueste import search_flavorqueste
     from discover.places import search_google_places, search_osm
-    from discover.reisty import search_reisty
 
     # Under a lead provider the others are enrichment, not discovery: sampling
     # them to the same depth means matches happen only where two independent
-    # samples happen to overlap. Reisty's whole catalogue is ~69 venues, so
-    # pulling all of it is cheap and turns luck into coverage.
-    reisty_cap = max(per_source, 100) if enrich_deep else per_source
+    # samples happen to overlap.
     fq_cap = max(per_source, 250) if enrich_deep else per_source
 
     providers: list[tuple[str, Callable[[], list[dict[str, Any]]]]] = [
         ("flavorqueste", lambda: search_flavorqueste(city, limit=fq_cap)),
     ]
-    if with_reisty:
-        providers.insert(
-            0, ("reisty", lambda: search_reisty(city, limit=reisty_cap, detail=True))
-        )
     if settings.GOOGLE_PLACES_API_KEY:
         providers.append(
             ("google", lambda: search_google_places(
@@ -1466,7 +1447,6 @@ def main() -> int:
     ap.add_argument("--no-menu-llm", action="store_true", help="skip menu-based cuisine/meal inference")
     ap.add_argument("--no-ig-profile", action="store_true", help="skip Instagram profile read")
     ap.add_argument("--no-serp-facts", action="store_true", help="skip SERP founding-year/WhatsApp lookup")
-    ap.add_argument("--with-reisty", action="store_true", help="re-enable the 69-venue Reisty directory")
     ap.add_argument("--ig-gap", type=float, default=20.0, help="seconds between IG profiles")
     ap.add_argument(
         "--max-reviews", type=int, default=None,
@@ -1492,7 +1472,6 @@ def main() -> int:
     places = collect(
         args.city, args.per_source, args.photo_limit,
         rich=not args.no_rich, enrich_deep=bool(args.primary),
-        with_reisty=args.with_reisty,
     )
     if not places:
         print("no places fetched", file=sys.stderr)

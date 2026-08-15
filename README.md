@@ -8,12 +8,12 @@ The output is JSON, not database writes. Nothing here posts to Exploree yet.
 
 ## What it does
 
-Three mapping scripts, one per entity:
+Four mapping scripts, one per entity:
 
 | Script | Produces | Sources |
 |---|---|---|
 | `scripts/map_exploree_restaurants.py` | `Restaurant` records | Google Places, FlavorQueste, Serper, Instagram, Gemini vision, DeepSeek |
-| `scripts/map_exploree_experiences.py` | `Experience` records | Tix Africa, Reisty events, Google geocoding, DeepSeek |
+| `scripts/map_exploree_experiences.py` | `Experience` records | Tix Africa, Google geocoding, DeepSeek |
 | `scripts/map_exploree_organizers.py` | `Organizer` records | Tix Africa |
 | `scripts/map_exploree_menus.py` | `Menu` records, one per dish | the venue's menu PDF or page |
 
@@ -38,19 +38,66 @@ stderr so they stay out of the data.
 
 ## Keys you need
 
-| Key | Needed for | Without it |
+Copy `.env.example` to `.env`, then fill these. Links go to where the key is created.
+
+| Key | Needed for | Get it from | Without it |
+|---|---|---|---|
+| `GOOGLE_PLACES_API_KEY` | venue discovery, hours, coordinates, attributes, geocoding | [Google Cloud credentials](https://console.cloud.google.com/apis/credentials) — enable **Places API (New)** first ([docs](https://developers.google.com/maps/documentation/places/web-service/get-api-key)) | falls back to OpenStreetMap, loses most fields |
+| `SERPER_API_KEY` | Instagram handles, venue facts, interior image search | [serper.dev](https://serper.dev/) → API Key (2,500 free queries) | no handles, no dress code, no founding year |
+| `GEMINI_API_KEY` | reading venue photos for lighting, coziness, seating | [Google AI Studio](https://aistudio.google.com/apikey) | those fields stay null |
+| `DEEPSEEK_API_KEY` | menu and review interpretation | [DeepSeek platform](https://platform.deepseek.com/api_keys) | no cuisine, meal, or ambience from text |
+| `IG_COOKIES_FILE` | logged-in Instagram session (see below) | export from a logged-in browser — steps below | no profile WhatsApp / founding / grid photos; discover handle search fails without a session (Serper can still find handles) |
+| `MONGODB_URI` | writing finished records to the product database | [MongoDB Atlas](https://cloud.mongodb.com/) → Connect → Drivers, or a local `mongodb://localhost:27017` | validation still runs, nothing is written |
+| `MONGODB_DB_NAME` | which Atlas/local database to write | same Atlas cluster (database name you choose) | defaults in code; set it to match Exploree |
+
+### Instagram cookies — how to get them and what they do
+
+Instagram has no public search/profile API for third-party apps. A **logged-in browser session** (cookies) is how this repo talks to Instagram’s private web endpoints. Cookies are **not** used for normal post ingest (that stays on Graph API or logged-out Playwright).
+
+**What they unlock**
+
+| Use | Code | Without cookies |
 |---|---|---|
-| `GOOGLE_PLACES_API_KEY` | venue discovery, hours, coordinates, attributes, geocoding | falls back to OpenStreetMap, loses most fields |
-| `SERPER_API_KEY` | Instagram handles, venue facts, interior image search | no handles, no dress code, no founding year |
-| `GEMINI_API_KEY` | reading venue photos for lighting, coziness, seating | those fields stay null |
-| `DEEPSEEK_API_KEY` | menu and review interpretation | no cuisine, meal, or ambience from text |
-| `IG_COOKIES_FILE` | Instagram profile reads | no WhatsApp, founding date, or grid photos |
-| `MONGODB_URI` | writing finished records to the product database | validation still runs, nothing is written |
+| Venue → IG handle via Instagram topsearch | `ig/logged_in_search.py`, `main.py discover` | discover cannot resolve handles that way; restaurant mapping can still use Serper (`site:instagram.com`) |
+| Profile bio / link-in-bio / grid photos | `ig/logged_in_profile.py`, `map_exploree_restaurants.py` | WhatsApp, founding year from bio, and grid photos stay empty |
+
+Required cookies: `sessionid` and `csrftoken`. Optional but useful: `ds_user_id`, `mid`, `ig_did`.
+
+**How to export (local)**
+
+1. Log in to [instagram.com](https://www.instagram.com/) in Chrome (a normal personal account).
+2. Install [Cookie-Editor](https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm).
+3. On an Instagram tab, open Cookie-Editor → **Export** → **Netscape**.
+4. Save the file as `cookies.txt` in the repo root (gitignored).
+5. Leave `IG_COOKIES_FILE=cookies.txt` in `.env` (the default).
+
+Alternatively, DevTools → Application → Cookies → `instagram.com`, or copy the request `Cookie` header into `IG_COOKIES`. Individual vars (`IG_SESSIONID`, `IG_CSRFTOKEN`, …) also work but go stale easily; the Netscape file wins when both are set.
+
+**On Render**
+
+Disk is ephemeral, so do not upload `cookies.txt`. Paste the full Netscape export into the multiline secret `IG_COOKIES_NETSCAPE` (or a Cookie header into `IG_COOKIES`). At startup the app writes that into `cookies.txt` for the same code path.
+
+**Caveats**
+
+- Sessions expire and Instagram will `checkpoint_required` if you hit search/profile too hard from a datacenter IP — keep gaps high (`IG_SEARCH_GAP_S`, profile pacing) or use a residential `IG_PROXY_URL`.
+- Never commit cookies. Rotate the account password / log out other sessions if a `sessionid` was pasted into chat or logs.
+
+### Optional
+
+| Key | Needed for | Get it from |
+|---|---|---|
+| `IG_COOKIES_NETSCAPE` | same session as `IG_COOKIES_FILE`, for Render secrets | same Cookie-Editor Netscape export, pasted as multiline text |
+| `IG_COOKIES` | same session, as a raw `Cookie:` header string | DevTools → Network → any instagram.com request → Request Headers |
+| `IG_PROXY_URL` | Instagram from a datacenter IP (Render) | a residential proxy provider — public free lists are not usable for this |
+| `IG_GRAPH_ACCESS_TOKEN` / `IG_GRAPH_USER_ID` | Meta Graph API as primary ingest (optional) | [Meta for Developers](https://developers.facebook.com/apps/) → Instagram Graph API |
+| `GEMINI_MODEL` | which Gemini model to call | listed in [AI Studio](https://aistudio.google.com/); default `gemini-flash-latest` |
 
 Gemini's free tier is around 200 requests a day, and free requests are
 deprioritised under load, which shows up as "this model is currently
 experiencing high demand". The script tries fallback models before giving up,
 but a 500 venue run needs billing enabled on the project.
+
+Full variable list (including pacing and cron knobs) lives in `.env.example`.
 
 ## How a restaurant record is built
 
@@ -91,7 +138,6 @@ Anything that cannot be established stays null. The script never guesses.
 --primary google     lead provider, also restricts the sample to its venues
 --max-reviews 300    only sample venues under this review count
 --exclude FILE       skip venues already in a previous output file
---with-reisty        add the 69 venue Reisty directory
 --no-vision          skip the photo pass
 --no-llm             skip DeepSeek
 --no-ig-profile      skip Instagram
@@ -115,10 +161,6 @@ different business, and returns null rather than a plausible guess.
 **Instagram bios contain template placeholders.** One venue publishes
 `instagram.com/yourpage`. Handles are checked against the venue name and
 domain before they are accepted.
-
-**Reisty covers 69 venues.** It is off by default. Everything it used to be
-the only source for now has a replacement that works on all venues. Turn it
-on with `--with-reisty` for extra coverage on those 69.
 
 **Menus are not only on Linktree, and often do not exist.** The menu URL is
 looked for on the venue site, on any link aggregator, and in the Instagram bio
@@ -224,7 +266,7 @@ than describe a different business with the same name.
 
 ```
 scripts/          the three mapping scripts
-discover/         Google Places, FlavorQueste, Reisty, Tix clients
+discover/         Google Places, FlavorQueste, Tix clients
 ig/               Instagram session, search, profile reads
 pipeline/         menus, OCR, DeepSeek, MongoDB writes
 config/settings   all env config
@@ -234,7 +276,7 @@ docs/             architecture and sample payloads
 ## Legal
 
 Google Places, Serper, Gemini and DeepSeek are used through their APIs under
-normal terms. FlavorQueste, Reisty and Tix are read through public endpoints
+normal terms. FlavorQueste and Tix are read through public endpoints
 their own web clients use.
 
 Instagram is the exception. Both the logged out and logged in paths are

@@ -779,10 +779,10 @@ def discover_places(
     backend: str | None = None,
 ) -> list[dict[str, Any]]:
     """
-    backend: auto | osm | google | flavorqueste | reisty | enrich
+    backend: auto | osm | google | flavorqueste | enrich
 
     ``auto`` = google if API key set, else osm (legacy).
-    ``enrich`` = FlavorQueste + Reisty (+ google/osm) for denser Lagos coverage.
+    ``enrich`` = FlavorQueste (+ google/osm) for denser Lagos coverage.
     """
     mode = (backend or settings.PLACES_BACKEND or "auto").lower()
     if mode == "auto":
@@ -796,10 +796,6 @@ def discover_places(
         from discover.flavorqueste import search_flavorqueste
 
         return search_flavorqueste(city_key, limit=limit)
-    if mode == "reisty":
-        from discover.reisty import search_reisty
-
-        return search_reisty(city_key, limit=limit)
     if mode == "enrich":
         return _discover_enriched(city_key, limit=limit)
     raise ValueError(f"unknown places backend {mode!r}")
@@ -808,7 +804,6 @@ def discover_places(
 def _discover_enriched(city_key: str, *, limit: int) -> list[dict[str, Any]]:
     """Merge Lagos directories. Separate source ids — no cross-source overwrite."""
     from discover.flavorqueste import search_flavorqueste
-    from discover.reisty import search_reisty
 
     chunks: list[dict[str, Any]] = []
     # FlavorQueste is the densest public catalog (~600).
@@ -816,10 +811,6 @@ def _discover_enriched(city_key: str, *, limit: int) -> list[dict[str, Any]]:
         chunks.extend(search_flavorqueste(city_key, limit=min(limit, 400)))
     except Exception as exc:  # noqa: BLE001
         log.warning("[enrich] flavorqueste failed: %s", exc)
-    try:
-        chunks.extend(search_reisty(city_key, limit=min(limit, 120), detail=True))
-    except Exception as exc:  # noqa: BLE001
-        log.warning("[enrich] reisty failed: %s", exc)
 
     # Keep Maps/OSM as a supplement for venues missing from local apps.
     remaining = max(0, limit - len(chunks))

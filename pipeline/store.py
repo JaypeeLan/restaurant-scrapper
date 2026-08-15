@@ -108,7 +108,7 @@ def upsert_places(db, places: list[dict[str, Any]]) -> int:
 
 
 def upsert_external_events(db, events: list[dict[str, Any]]) -> int:
-    """Upsert organizer / restaurant events from Reisty, Tix, etc."""
+    """Upsert organizer / restaurant events from Tix, etc."""
     if not events:
         return 0
     ops: list[UpdateOne] = []

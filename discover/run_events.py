@@ -21,24 +21,15 @@ def run_discover_events(
     """
     Fetch external events and upsert into ``external_events``.
 
-    Sources: reisty | tix | all
+    Sources: tix | all
     """
-    wanted = {s.strip().lower() for s in (sources or ["reisty", "tix"]) if s.strip()}
+    wanted = {s.strip().lower() for s in (sources or ["tix"]) if s.strip()}
     if "all" in wanted:
-        wanted = {"reisty", "tix"}
+        wanted = {"tix"}
     cap = limit if limit is not None else settings.DISCOVER_EVENTS_LIMIT
     started = datetime.now(timezone.utc)
     events: list[dict[str, Any]] = []
     errors: list[str] = []
-
-    if "reisty" in wanted:
-        try:
-            from discover.reisty import fetch_reisty_events
-
-            events.extend(fetch_reisty_events(limit=cap))
-        except Exception as exc:  # noqa: BLE001
-            log.warning("reisty events failed: %s", exc)
-            errors.append(f"reisty: {exc}")
 
     if "tix" in wanted:
         try:
