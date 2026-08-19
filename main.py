@@ -425,12 +425,12 @@ def cmd_search_handles(args: argparse.Namespace) -> int:
 
 
 def cmd_discover(args: argparse.Namespace) -> int:
-    """Places → Instagram handles → seed accounts (no manual venue list)."""
+    """Places → Instagram handles (via Serper) → seed accounts."""
+    from config import settings
     from discover.run_discover import run_discover
-    from ig import logged_in_search
 
-    if not args.dry_run and not logged_in_search.session_configured():
-        print("  ✗ logged-in cookies required (cookies.txt) to resolve handles")
+    if not args.dry_run and not settings.SERPER_API_KEY:
+        print("  ✗ SERPER_API_KEY required to resolve Instagram handles")
         return 1
 
     discover_ok = True
@@ -617,7 +617,7 @@ def main() -> int:
 
     p_disc = sub.add_parser(
         "discover",
-        help="Places (FlavorQueste/Google/OSM) → IG handles → seed accounts",
+        help="Places (FlavorQueste/Google/OSM) → Serper IG handles → seed accounts",
     )
     p_disc.add_argument("--city", default=settings.DISCOVER_CITY, help="lagos | abuja")
     p_disc.add_argument("--place-limit", type=int, default=settings.DISCOVER_PLACE_LIMIT)
